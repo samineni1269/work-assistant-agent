@@ -312,9 +312,9 @@ async function loadConns(){
 function fmt(t){
   return t
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/\*\*([^*\\n]+)\*\*/g,'<b>$1</b>')
+    .replace(/[*][*]([^*\\n]+)[*][*]/g,'<b>$1</b>')
     .replace(/`([^`\\n]+)`/g,'<code>$1</code>')
-    .replace(/^[•\-] (.+)$/gm,'<span class="blt">$1</span>');
+    .replace(/^[•\\-] (.+)$/gm,'<span class="blt">$1</span>');
 }
 
 // ── Chat messages ─────────────────────────────────────────────────────────────
