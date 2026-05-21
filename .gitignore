@@ -1,0 +1,54 @@
+# ── Credentials & secrets ──────────────────────────────────────────────────────
+.env
+*.env
+!.env.example
+
+# Microsoft token cache
+~/.work-assistant-token-cache.json
+.work-assistant-token-cache.json
+
+# Google OAuth token cache
+token.json
+google_token.json
+
+# ── Guardrail runtime state & logs ────────────────────────────────────────────
+guardrail_settings.json
+audit.log
+*.log
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+ENV/
+.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ── Windows ───────────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Misc runtime files ────────────────────────────────────────────────────────
+*.bak
+*.tmp
+=3.0.0

@@ -1,0 +1,27 @@
+# ── LLM providers (install all; agent auto-detects which key is set) ──────────
+google-genai>=1.0.0          # Gemini  (GEMINI_API_KEY)
+anthropic>=0.30.0            # Claude  (ANTHROPIC_API_KEY)
+openai>=1.30.0               # OpenAI + OpenRouter  (OPENAI_API_KEY / OPENROUTER_API_KEY)
+
+# ── Microsoft 365 auth ────────────────────────────────────────────────────────
+msal>=1.28.0
+
+# ── HTTP + env ────────────────────────────────────────────────────────────────
+requests>=2.31.0
+python-dotenv==1.0.1
+
+# ── Terminal UI ───────────────────────────────────────────────────────────────
+rich>=13.0.0
+
+# ── Web UI (replaces tkinter — works with any Python version) ─────────────────
+flask>=3.0.0
+
+# ── System tray (Mac/Windows launcher icon — optional) ────────────────────────
+pystray>=0.19.4
+Pillow>=10.0.0
+
+# ── Office documents ─────────────────────────────────────────────────────────
+python-docx>=1.1.0
+python-pptx>=0.6.23
+
+# GitHub, Linear, Zoom, Google Meet use requests (already above)
