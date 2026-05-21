@@ -237,6 +237,7 @@ body{background:#16181d;color:#d4d8e8;font-family:-apple-system,BlinkMacSystemFo
   <div id="sb-hdr">
     <div id="sb-title">&#9889; Work Assistant</div>
     <div id="sb-sub">Your AI work companion</div>
+    <div id="sb-pub" style="margin-top:6px;font-size:10px;color:#6b7394;word-break:break-all"></div>
   </div>
   <div id="sb-srch">
     <input id="srch-inp" type="text" placeholder="&#128270;  Filter actions..." oninput="filter(this.value)">
@@ -400,6 +401,21 @@ function setDot(s){
 
 function onKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
 
+// ── Public URL (Cloudflare tunnel) ───────────────────────────────────────────
+async function pollPublicUrl(){
+  for(let i=0;i<30;i++){
+    await new Promise(r=>setTimeout(r,2000));
+    try{
+      const d=await(await fetch('/public-url')).json();
+      if(d.url){
+        const el=document.getElementById('sb-pub');
+        el.innerHTML=`&#127760; <a href="${d.url}" target="_blank" style="color:#64ffda;text-decoration:none">${d.url}</a>`;
+        return;
+      }
+    }catch(e){}
+  }
+}
+
 // ── Guardrails ────────────────────────────────────────────────────────────────
 async function loadGuardrails(){
   try{
@@ -428,6 +444,7 @@ async function toggleGuardrail(name){
 async function init(){
   buildSidebar();
   loadGuardrails();
+  pollPublicUrl();
   const conns=await loadConns();
   const ok=conns.filter(c=>c.ok).map(c=>c.name).join(', ')||'none';
   const miss=conns.filter(c=>!c.ok).map(c=>c.name);
@@ -518,17 +535,79 @@ def guardrails_toggle(name):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# CLOUDFLARE TUNNEL  (optional public URL)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PUBLIC_URL: str | None = None
+
+def _start_tunnel():
+    """Launch cloudflared quick-tunnel in background; parse and store the URL."""
+    global _PUBLIC_URL
+    import subprocess, re
+
+    # Common install locations for cloudflared on macOS
+    candidates = [
+        "cloudflared",
+        "/opt/homebrew/bin/cloudflared",
+        "/usr/local/bin/cloudflared",
+    ]
+    binary = next((c for c in candidates
+                   if subprocess.run(["which", c] if c == "cloudflared"
+                                     else ["test", "-f", c],
+                                     capture_output=True).returncode == 0), None)
+    if not binary:
+        print("⚠️  cloudflared not found — running local only.")
+        return
+
+    try:
+        proc = subprocess.Popen(
+            [binary, "tunnel", "--url", f"http://localhost:{PORT}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        url_re = re.compile(r"https://[a-z0-9\-]+\.trycloudflare\.com")
+        for line in proc.stdout:
+            m = url_re.search(line)
+            if m:
+                _PUBLIC_URL = m.group(0)
+                print("\n" + "━" * 54)
+                print(f"  🌐  Public URL : {_PUBLIC_URL}")
+                print(f"  💻  Local URL  : http://localhost:{PORT}")
+                print("━" * 54 + "\n")
+                break
+    except Exception as e:
+        print(f"⚠️  Tunnel error: {e}")
+
+
+@app.route("/public-url")
+def public_url():
+    return jsonify({"url": _PUBLIC_URL})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     os.chdir(Path(__file__).parent)
     import webbrowser
-    url = f"http://localhost:{PORT}"
-    threading.Timer(1.2, lambda: webbrowser.open(url)).start()
-    print(f"🚀  Work Assistant running at {url}")
-    print("     Close this terminal window (or press Ctrl+C) to stop.")
-    app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True, use_reloader=False)
+
+    local_url = f"http://localhost:{PORT}"
+
+    # Start Cloudflare tunnel in background thread
+    tunnel_thread = threading.Thread(target=_start_tunnel, daemon=True)
+    tunnel_thread.start()
+
+    # Open browser after Flask is ready
+    threading.Timer(1.5, lambda: webbrowser.open(local_url)).start()
+
+    print(f"\n🚀  Work Assistant starting...")
+    print(f"     Local  : {local_url}")
+    print(f"     Public : fetching tunnel URL…  (appears in ~5 seconds)")
+    print(f"     Press Ctrl+C to stop.\n")
+
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True, use_reloader=False)
 
 
 if __name__ == "__main__":
