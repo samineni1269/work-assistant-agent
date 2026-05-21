@@ -87,7 +87,7 @@ Every destructive or write operation (send email, create ticket, post message, m
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/saisamineni/work-assistant-agent.git
+git clone https://github.com/samineni1269/work-assistant-agent.git
 cd work-assistant-agent
 
 python3 -m venv venv
