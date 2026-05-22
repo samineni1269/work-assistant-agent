@@ -360,6 +360,116 @@ work-assistant-agent/
 
 ---
 
+## Microsoft Teams — Known API Issues & Fixes
+
+This section documents all Graph API quirks discovered during development and debugging. If Teams stops working, check here first.
+
+### 1. `/me/chats` — `$orderby` not supported → 400 Bad Request
+
+**Symptom:** Teams chats fail to load with a 400 error mentioning `$orderby`.
+
+**Cause:** The Microsoft Graph `/me/chats` endpoint does not support `$orderby` as a query parameter, unlike most other Graph endpoints.
+
+**Fix (applied in `tools/ms365.py`):** Remove `$orderby` from the request and sort in Python instead:
+```python
+# ❌ Broken — causes 400 Bad Request
+"/me/chats?$orderby=lastUpdatedDateTime desc"
+
+# ✅ Fixed — sort in Python after fetching
+chats.sort(key=lambda c: c.get("lastUpdatedDateTime") or "", reverse=True)
+```
+
+---
+
+### 2. `Team.ReadBasic.All` scope missing → 403 on `/me/joinedTeams`
+
+**Symptom:** `list_teams()` fails with 403 Forbidden.
+
+**Cause:** The scope `Team.ReadBasic.All` was not included in `GRAPH_SCOPES`, so the token didn't have permission to call `/me/joinedTeams`.
+
+**Fix:** Added `Team.ReadBasic.All` to `GRAPH_SCOPES` in `tools/ms365.py`. After adding a new scope, you must clear the token cache and sign in again:
+```bash
+rm ~/.work-assistant-token-cache.json
+python3 app.py   # will prompt for sign-in with new scopes
+```
+
+---
+
+### 3. `ChannelMessage.Read.All` requires admin consent → breaks token acquisition
+
+**Symptom:** MSAL fails to acquire a token entirely, or tokens silently have no access to anything.
+
+**Cause:** `ChannelMessage.Read.All` requires Azure AD admin consent and cannot be requested by a user-level device code flow. Including it in the scope list breaks the entire auth flow for personal accounts and most work tenants.
+
+**Fix:** Removed `ChannelMessage.Read.All` from `GRAPH_SCOPES`. Channel message reading now uses `Chat.ReadWrite` for DM chats only, with a graceful 403 fallback for channel messages:
+```python
+except RuntimeError as e:
+    if "403" in str(e) or "Forbidden" in str(e):
+        return [{"error": "Cannot read channel messages — ChannelMessage.Read.All requires admin consent"}]
+    raise
+```
+
+---
+
+### 4. `$expand=members` nested `$select` → 400 Bad Request
+
+**Symptom:** `get_teams_chats()` fails to expand member names.
+
+**Cause:** The Graph API `/me/chats?$expand=members($select=displayName,email)` syntax does not support a nested `$select` clause on the members expansion. Any nested `$select` causes a 400 error. The `email` field also does not exist on the base `conversationMember` type (only on the derived `aadUserConversationMember`).
+
+**Fix:** Remove the nested `$select` entirely — just use `$expand=members`:
+```python
+# ❌ Broken — nested $select causes 400
+"$expand=members($select=displayName,email)"
+"$expand=members($select=id,displayName,roles)"
+
+# ✅ Fixed — no nested $select
+"$expand=members"
+```
+
+---
+
+### 5. Message bodies contain raw HTML → agent misreads content
+
+**Symptom:** The agent reads Teams messages but reports garbled content or claims an error even though the API call succeeded.
+
+**Cause:** Teams message bodies are returned as HTML (`contentType: html`). The raw `<div>`, `<p>`, `<span>` tags confuse the LLM, which interprets the response as broken or errored.
+
+**Fix (applied in `tools/ms365.py`):** Strip HTML tags before returning message content:
+```python
+if body_obj.get("contentType") == "html":
+    body_text = re.sub(r"<[^>]+>", " ", body_text)
+    body_text = re.sub(r"\s+", " ", body_text).strip()
+```
+
+---
+
+### 6. Chat `id` field name confuses the agent
+
+**Symptom:** After listing chats successfully, asking the agent to "read messages from this chat" fails because the agent doesn't know which field to pass as `chat_id`.
+
+**Cause:** `get_teams_chats()` returned `id` as the key. When the agent later called `get_chat_messages(chat_id=...)`, it sometimes hallucinated a wrong ID because `id` is an ambiguous field name across many tools.
+
+**Fix:** Renamed the key from `id` to `chat_id` in the returned chat object so the agent can directly map it to the `get_chat_messages(chat_id=...)` parameter:
+```python
+chat["chat_id"] = chat.pop("id", None)
+```
+
+---
+
+### Quick diagnostic script
+
+If Teams stops working, run:
+```bash
+cd ~/Desktop/work-assistant-agent
+source venv/bin/activate
+python3 debug_teams.py
+```
+
+This script tests each Graph API endpoint independently and prints the exact error at each step, making it easy to pinpoint which of the above issues has recurred.
+
+---
+
 ## Security notes
 
 - Your `.env` file contains sensitive credentials — it is in `.gitignore` and must never be committed

@@ -445,6 +445,21 @@ def get_repo_workflow_runs(repo: str, max_count: int = 10) -> list[dict]:
     ]
 
 
+def get_my_open_prs(max_count: int = 20) -> list[dict]:
+    """
+    Get all open pull requests authored by the current user across ALL repositories.
+
+    Use this when the user asks "list my open PRs", "what PRs do I have open",
+    "show my pull requests" — i.e. without specifying a particular repo.
+
+    Returns:
+        List of PR dicts: number, title, repo, state, url, created_at, updated_at
+    """
+    login = _default_owner()
+    query = f"is:pr is:open author:{login}"
+    return search_github(query, search_type="issues", max_count=max_count)
+
+
 def get_my_review_requests(max_count: int = 20) -> list[dict]:
     """
     Get all PRs where the current user's review has been requested.

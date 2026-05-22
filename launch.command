@@ -23,14 +23,14 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
-# ── Install Flask if missing (web UI dependency) ──────────────────────────────
-python -c "import flask" 2>/dev/null || {
-    echo "📦  Installing Flask (web UI)..."
-    pip install flask>=3.0.0 --quiet
+# ── Install any missing dependencies ─────────────────────────────────────────
+python3 -c "import flask" 2>/dev/null || {
+    echo "📦  Installing dependencies..."
+    pip3 install -r requirements.txt --quiet
 }
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 echo "🚀  Starting Work Assistant..."
 echo "     Browser will open automatically at http://localhost:7432"
 echo "     Close this window to stop the server."
-python app.py
+python3 app.py

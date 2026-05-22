@@ -16,6 +16,7 @@ import os
 import sys
 import json
 import datetime
+import concurrent.futures
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
@@ -52,6 +53,22 @@ def _zoom():
     from tools import zoom_meet
     return zoom_meet
 
+def _mem():
+    from tools import memory
+    return memory
+
+def _rag():
+    from tools import rag
+    return rag
+
+def _browser():
+    from tools import browser_tool
+    return browser_tool
+
+def _analytics():
+    from tools import analytics
+    return analytics
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TOOL SETS — read vs write (provider-agnostic)
@@ -79,6 +96,9 @@ READ_TOOLS = {
     # Zoom / Meet reads
     "list_zoom_meetings", "get_zoom_meeting", "list_zoom_recordings",
     "list_google_calendar_events",
+    # Super-agent reads
+    "search_knowledge_base", "browse_url", "search_web",
+    "get_memory_summary", "get_analytics_summary",
 }
 
 # WRITE tools — always show preview and require user confirmation
@@ -98,6 +118,8 @@ WRITE_TOOLS = {
     "transition_linear_issue", "add_linear_comment",
     # Zoom / Meet writes
     "create_zoom_meeting", "create_google_meet",
+    # Memory writes
+    "update_memory_entry",
 }
 
 
@@ -160,6 +182,7 @@ def dispatch_tool(name: str, args: dict) -> str:
         "create_presentation":         lambda: docs.create_presentation(**args),
         "add_slide_to_presentation":   lambda: docs.add_slide_to_presentation(**args),
         # GitHub
+        "get_my_open_prs":             lambda: gh.get_my_open_prs(**args),
         "get_github_notifications":    lambda: gh.get_github_notifications(**args),
         "get_my_review_requests":      lambda: gh.get_my_review_requests(**args),
         "list_my_repos":               lambda: gh.list_my_repos(**args),
@@ -191,6 +214,16 @@ def dispatch_tool(name: str, args: dict) -> str:
         # Google Meet
         "list_google_calendar_events": lambda: zoom.list_google_calendar_events(**args),
         "create_google_meet":          lambda: zoom.create_google_meet(**args),
+        # Knowledge base
+        "search_knowledge_base": lambda: _rag().search_knowledge_base(**args),
+        # Browser
+        "browse_url":            lambda: _browser().browse_url(**args),
+        "search_web":            lambda: _browser().search_web(**args),
+        # Memory
+        "update_memory_entry":   lambda: _mem().update_memory_entry(**args),
+        "get_memory_summary":    lambda: _mem().get_memory_summary(),
+        # Analytics
+        "get_analytics_summary": lambda: _analytics().get_analytics_summary(**args),
     }
 
     if name not in dispatch:
@@ -400,7 +433,15 @@ def _indent(text: str, spaces: int) -> str:
 # SYSTEM PROMPT
 # ══════════════════════════════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = f"""You are a professional work assistant for a corporate employee.
+def _build_system_prompt() -> str:
+    """Build the system prompt, injecting memory and tone guide dynamically."""
+    from tools.memory import get_memory_context
+    from tools.tone_learner import get_tone_instructions
+
+    memory_ctx = get_memory_context()
+    tone_guide = get_tone_instructions()
+
+    base = f"""You are a professional work assistant for a corporate employee.
 Today is {datetime.datetime.now().strftime("%A, %d %B %Y")}.
 
 You have access to the following tools:
@@ -427,6 +468,14 @@ Your principles:
 6. For standup summary, fetch: my Jira issues updated in the last 24 hours, any blockers, and today's calendar.
 7. Never guess IDs — if you don't know a chat ID, list chats first to find the right one.
 """
+
+    if memory_ctx:
+        base += f"\n\n{memory_ctx}"
+
+    if tone_guide:
+        base += f"\n\n{tone_guide}"
+
+    return base
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -456,8 +505,14 @@ def run_agent_turn(conversation_history: list, user_message: str,
         check_input, check_tool_call, process_tool_result,
         audit_write, scrub_output,
     )
+    from tools.memory import get_memory_context, extract_and_save_facts
+    from tools.tone_learner import get_tone_instructions
+    from tools.analytics import log_interaction, TurnTimer
 
     warnings: list[str] = []
+    _tools_called: list[str] = []
+    _turn_timer = TurnTimer()
+    _turn_timer.__enter__()
 
     # ── Guardrail 1: validate user input ──────────────────────────────────────
     safe, reason = check_input(user_message)
@@ -476,16 +531,37 @@ def run_agent_turn(conversation_history: list, user_message: str,
 
     tool_call_count = 0   # tracked for bulk_protection
 
+    system_prompt = _build_system_prompt()
+
     while True:
         # run_turn returns (tool_calls, text)
         #   tool_calls: list of (name, args, call_id) — non-empty when model wants a tool
         #   text: final response string — non-empty when model is done
-        tool_calls, text = provider.run_turn(SYSTEM_PROMPT, conversation_history, TOOLS)
+        tool_calls, text = provider.run_turn(system_prompt, conversation_history, TOOLS)
 
         if not tool_calls:
             # ── Guardrail 2: scrub secrets from final response ────────────────
             text = scrub_output(text)
             conversation_history.append({"role": "assistant", "content": text})
+
+            # ── Post-turn: learn from this exchange ───────────────────────────
+            try:
+                extract_and_save_facts(user_message, text)
+            except Exception:
+                pass
+
+            # ── Post-turn: log analytics ──────────────────────────────────────
+            try:
+                _turn_timer.__exit__(None, None, None)
+                log_interaction(
+                    user_message=user_message,
+                    tools_called=_tools_called,
+                    response_time_ms=_turn_timer.elapsed_ms,
+                    success=True,
+                )
+            except Exception:
+                pass
+
             return text, conversation_history, warnings
 
         # Model wants to call tools — record the assistant turn
@@ -498,43 +574,71 @@ def run_agent_turn(conversation_history: list, user_message: str,
             ],
         })
 
-        # Execute each tool call and append results
-        for name, args, tc_id in tool_calls:
-            tool_call_count += 1
+        # Separate reads (parallelisable) from writes (must be sequential)
+        read_calls  = [(n, a, i) for n, a, i in tool_calls if n not in WRITE_TOOLS]
+        write_calls = [(n, a, i) for n, a, i in tool_calls if n in WRITE_TOOLS]
 
-            # ── Guardrail 3: check if this tool call is allowed ───────────────
+        tool_results: dict[str, str] = {}  # tc_id → result
+
+        # ── Execute READ tools in parallel ────────────────────────────────────
+        if read_calls:
+            tool_call_count += len(read_calls)
+
+            def _run_read(call_tuple):
+                name, args, tc_id = call_tuple
+                allowed, block_reason = check_tool_call(name, args, tool_call_count)
+                if not allowed:
+                    warnings.append(block_reason)
+                    return tc_id, name, json.dumps({"status": "blocked", "reason": block_reason})
+                raw = dispatch_tool(name, args)
+                scrubbed, warn = process_tool_result(name, raw)
+                if warn:
+                    warnings.append(warn)
+                return tc_id, name, scrubbed
+
+            with console.status(f"[dim]Fetching {', '.join(n for n, _, _ in read_calls)}...[/dim]"):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(read_calls), 6)) as pool:
+                    futures = {pool.submit(_run_read, call): call for call in read_calls}
+                    for future in concurrent.futures.as_completed(futures):
+                        tc_id, name, result = future.result()
+                        tool_results[tc_id] = (name, result)
+                        _tools_called.append(name)
+
+        # ── Execute WRITE tools sequentially ──────────────────────────────────
+        for name, args, tc_id in write_calls:
+            tool_call_count += 1
             allowed, block_reason = check_tool_call(name, args, tool_call_count)
             if not allowed:
                 result = json.dumps({"status": "blocked", "reason": block_reason})
                 warnings.append(block_reason)
-                conversation_history.append({
-                    "role": "tool", "call_id": tc_id,
-                    "name": name, "content": result,
-                })
+                tool_results[tc_id] = (name, result)
                 continue
 
-            if name in WRITE_TOOLS:
-                # ── Guardrail 4a: audit write op before execution ─────────────
-                audit_write(name, args)
-                confirmed = True if auto_confirm else confirm_write_operation(name, args)
-                if not confirmed:
-                    result = json.dumps({"status": "cancelled", "reason": "User cancelled this operation."})
-                else:
-                    result = dispatch_tool(name, args)
+            # ── Guardrail 4a: audit write op before execution ─────────────────
+            audit_write(name, args)
+            confirmed = True if auto_confirm else confirm_write_operation(name, args)
+            if not confirmed:
+                result = json.dumps({"status": "cancelled", "reason": "User cancelled this operation."})
             else:
-                with console.status(f"[dim]Fetching {name}...[/dim]"):
-                    result = dispatch_tool(name, args)
+                result = dispatch_tool(name, args)
 
-            # ── Guardrail 4b: scrub + injection-scan tool result ──────────────
             result, warn = process_tool_result(name, result)
             if warn:
                 warnings.append(warn)
+            tool_results[tc_id] = (name, result)
+            _tools_called.append(name)
 
+        # Append all results in the original call order
+        for name, args, tc_id in tool_calls:
+            if tc_id in tool_results:
+                t_name, t_result = tool_results[tc_id]
+            else:
+                t_name, t_result = name, json.dumps({"status": "no_result"})
             conversation_history.append({
                 "role": "tool",
                 "call_id": tc_id,
-                "name": name,
-                "content": result,
+                "name": t_name,
+                "content": t_result,
             })
 
     # (loop continues until model returns a text-only response)

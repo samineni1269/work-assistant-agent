@@ -20,20 +20,37 @@ from typing import Optional
 # ─────────────────────────────────────────────
 
 # All Graph API permissions this agent needs
+# ⚠️  ChannelMessage.Read.All is NOT listed here — it requires admin consent
+#     and breaks token acquisition for personal accounts and most work tenants.
+#     Channel messages are fetched with a graceful fallback instead.
 GRAPH_SCOPES = [
     "Mail.ReadWrite",
     "Mail.Send",
     "Calendars.ReadWrite",
-    "Chat.ReadWrite",
-    "ChannelMessage.Read.All",
+    "Chat.ReadWrite",        # Direct chats (no admin consent needed)
+    "Team.ReadBasic.All",    # /me/joinedTeams — was missing, caused 403
     "Files.ReadWrite.All",
     "Sites.Read.All",
     "User.Read",
-    "offline_access",      # For refresh tokens (persistent login)
+    # Note: offline_access is handled automatically by MSAL — do NOT list it here
+]
+
+# Scopes that require admin consent — requested separately, failures are soft
+GRAPH_SCOPES_ADMIN = [
+    "ChannelMessage.Read.All",   # Read channel (team) messages
 ]
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 TOKEN_CACHE_PATH = Path.home() / ".work-assistant-token-cache.json"
+
+
+def clear_token_cache():
+    """Delete the cached token so the user is prompted to sign in again.
+    Call this if you change scopes or hit persistent auth errors."""
+    if TOKEN_CACHE_PATH.exists():
+        TOKEN_CACHE_PATH.unlink()
+        return {"status": "cleared", "path": str(TOKEN_CACHE_PATH)}
+    return {"status": "nothing_to_clear"}
 
 
 def _build_msal_app() -> msal.PublicClientApplication:
@@ -307,17 +324,46 @@ def create_calendar_event(
 
 def get_teams_chats(max_count: int = 10) -> list[dict]:
     """
-    Get recent Teams chats.
+    Get recent Teams chats (direct messages and group chats).
+
+    Note: /me/chats does NOT support $orderby — we sort in Python after fetching.
 
     Returns:
-        List of chat dicts: id, topic, chatType, lastUpdatedDateTime
+        List of chat dicts: id, topic, chatType, lastUpdatedDateTime, members
     """
+    # $orderby is NOT supported on /me/chats — omit it or you get 400 Bad Request
+    # $select inside $expand for members must only use base conversationMember fields
+    # (displayName, id, roles) — "email" is on the derived type and causes 400 errors
+    # Note: /me/chats $expand=members does NOT support nested $select — causes 400
     data = _graph(
         "GET",
-        f"/me/chats?$top={min(max_count, 50)}&$orderby=lastUpdatedDateTime desc"
-        f"&$select=id,topic,chatType,lastUpdatedDateTime",
+        f"/me/chats?$top={min(max_count, 50)}"
+        f"&$select=id,topic,chatType,lastUpdatedDateTime"
+        f"&$expand=members",
     )
-    return data.get("value", [])
+    chats = data.get("value", [])
+
+    # Sort by lastUpdatedDateTime descending (most recent first)
+    chats.sort(
+        key=lambda c: c.get("lastUpdatedDateTime") or "",
+        reverse=True,
+    )
+
+    # Simplify member list for readability
+    for chat in chats:
+        raw_members = chat.pop("members", []) or []
+        chat["members"] = [
+            m.get("displayName") or m.get("id") or "Unknown"
+            for m in raw_members
+            if not (m.get("displayName") or "").lower().startswith("me")
+        ]
+        if not chat.get("topic") and chat["members"]:
+            chat["topic"] = ", ".join(chat["members"][:3])
+
+        # Rename 'id' → 'chat_id' so the agent can directly use it in get_chat_messages
+        chat["chat_id"] = chat.pop("id", None)
+
+    return chats[:max_count]
 
 
 def get_chat_messages(chat_id: str, max_count: int = 20) -> list[dict]:
@@ -327,18 +373,32 @@ def get_chat_messages(chat_id: str, max_count: int = 20) -> list[dict]:
     Returns:
         List of message dicts: id, from, body, createdDateTime
     """
+    import re as _re
+
     data = _graph(
         "GET",
         f"/me/chats/{chat_id}/messages?$top={min(max_count, 50)}",
     )
     messages = []
     for m in data.get("value", []):
-        sender = m.get("from", {})
+        sender = m.get("from", {}) or {}
         user = sender.get("user", {}) or sender.get("application", {}) or {}
+
+        # Strip HTML tags from message body so the agent sees plain text
+        body_obj = m.get("body", {}) or {}
+        body_text = body_obj.get("content", "") or ""
+        if body_obj.get("contentType") == "html":
+            body_text = _re.sub(r"<[^>]+>", " ", body_text)
+            body_text = _re.sub(r"\s+", " ", body_text).strip()
+
+        # Skip empty system messages (calls, attachments with no text)
+        if not body_text or body_text in ("<attachment></attachment>", "​"):
+            continue
+
         messages.append({
             "id": m.get("id"),
             "from": user.get("displayName", "Unknown"),
-            "body": m.get("body", {}).get("content", ""),
+            "body": body_text[:500],          # cap per-message length
             "createdDateTime": m.get("createdDateTime"),
         })
     return messages
@@ -370,11 +430,29 @@ def get_teams_channels(team_id: str) -> list[dict]:
 
 
 def get_channel_messages(team_id: str, channel_id: str, max_count: int = 20) -> list[dict]:
-    """Get recent messages from a Teams channel."""
-    data = _graph(
-        "GET",
-        f"/teams/{team_id}/channels/{channel_id}/messages?$top={min(max_count, 50)}",
-    )
+    """
+    Get recent messages from a Teams channel.
+
+    Requires ChannelMessage.Read.All (admin consent). Returns a clear error
+    message if the permission has not been granted rather than crashing.
+    """
+    try:
+        data = _graph(
+            "GET",
+            f"/teams/{team_id}/channels/{channel_id}/messages?$top={min(max_count, 50)}",
+        )
+    except RuntimeError as e:
+        err = str(e)
+        if "403" in err or "Forbidden" in err or "Authorization" in err:
+            return [{
+                "error": (
+                    "Cannot read channel messages — the ChannelMessage.Read.All permission "
+                    "requires admin consent in your Microsoft 365 tenant. "
+                    "Ask your M365 admin to grant consent, or use the Teams app directly."
+                )
+            }]
+        raise
+
     messages = []
     for m in data.get("value", []):
         sender = (m.get("from") or {}).get("user", {}) or {}
