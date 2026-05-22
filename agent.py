@@ -15,6 +15,7 @@ Run:
 import os
 import sys
 import json
+import time
 import datetime
 import concurrent.futures
 from dotenv import load_dotenv
@@ -161,6 +162,35 @@ WRITE_TOOLS = {
 }
 
 
+def _with_retry(fn, tool_name: str, max_attempts: int = 3) -> str:
+    """
+    Call fn() up to max_attempts times with exponential backoff.
+    On all failures, return a graceful degradation message instead of crashing.
+    Never retries on auth errors (401/403) or bad-request (400) since those
+    are deterministic — retrying would waste time and quota.
+    """
+    NO_RETRY_SIGNALS = ("401", "403", "400", "invalid", "not found", "unauthorized")
+    delay = 1.0
+    last_err = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            err_str = str(e).lower()
+            last_err = e
+            if any(sig in err_str for sig in NO_RETRY_SIGNALS):
+                break   # deterministic error — pointless to retry
+            if attempt < max_attempts - 1:
+                time.sleep(delay)
+                delay *= 2   # exponential backoff: 1s, 2s
+    tool_label = tool_name.replace("_", " ")
+    return json.dumps({
+        "error": f"⚠️ {tool_label} is temporarily unavailable.",
+        "detail": str(last_err),
+        "suggestion": "The service may be down or rate-limited. Try again in a moment.",
+    })
+
+
 def dispatch_tool(name: str, args: dict) -> str:
     """Call the actual tool function and return result as JSON string."""
     ms   = _ms()
@@ -299,11 +329,10 @@ def dispatch_tool(name: str, args: dict) -> str:
     if name not in dispatch:
         return json.dumps({"error": f"Unknown tool: {name}"})
 
-    try:
-        result = dispatch[name]()
-        return json.dumps(result, default=str, indent=2)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    return _with_retry(
+        lambda: json.dumps(dispatch[name](), default=str, indent=2),
+        tool_name=name,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -718,6 +747,44 @@ def _summarise_history(history: list, provider) -> list:
         return recent
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PLANNER MODE — show a numbered plan before executing complex requests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PLANNER_KEYWORDS = {
+    "plan", "strategy", "set up", "setup", "organise", "organize", "prepare",
+    "roadmap", "workflow", "automate", "design", "architect",
+    "sprint", "onboard", "migrate", "restructure", "build out",
+}
+
+def _is_complex_request(message: str) -> bool:
+    """Heuristic: does this message look like it needs a multi-step plan?"""
+    low = message.lower()
+    has_keyword = any(kw in low for kw in _PLANNER_KEYWORDS)
+    is_long = len(message.split()) >= 8
+    return has_keyword and is_long
+
+
+def _build_plan(user_message: str, provider) -> str:
+    """Ask the LLM to produce a numbered action plan (no execution yet)."""
+    plan_prompt = (
+        "The user has a complex, multi-step request. "
+        "Produce a clear numbered plan (maximum 7 steps) of exactly what you will do. "
+        "Be specific: name the tools or concrete actions for each step. "
+        "Do NOT execute anything yet — produce only the plan.\n\n"
+        f"User request: {user_message}"
+    )
+    try:
+        _, plan_text = provider.run_turn(
+            system_prompt=_build_system_prompt(),
+            history=[{"role": "user", "content": plan_prompt}],
+            tools=[],
+        )
+        return plan_text.strip()
+    except Exception:
+        return ""
+
+
 def run_agent_turn(conversation_history: list, user_message: str,
                    auto_confirm: bool = False) -> tuple[str, list, list]:
     """
@@ -774,6 +841,16 @@ def run_agent_turn(conversation_history: list, user_message: str,
 
     system_prompt = _build_system_prompt()
 
+    # ── Planner mode: generate plan first for complex multi-step requests ─────
+    plan_prefix = ""
+    if _is_complex_request(user_message):
+        try:
+            plan_text = _build_plan(user_message, provider)
+            if plan_text:
+                plan_prefix = f"**📋 My plan:**\n{plan_text}\n\n---\n\n"
+        except Exception:
+            pass  # silent fallback — run without plan header
+
     while True:
         # run_turn returns (tool_calls, text)
         #   tool_calls: list of (name, args, call_id) — non-empty when model wants a tool
@@ -782,7 +859,8 @@ def run_agent_turn(conversation_history: list, user_message: str,
 
         if not tool_calls:
             # ── Guardrail 2: scrub secrets from final response ────────────────
-            text = scrub_output(text)
+            text = plan_prefix + scrub_output(text)
+            plan_prefix = ""   # only prepend once; clear after first use
             final_turn = {"role": "assistant", "content": text}
             conversation_history.append(final_turn)
             working_history.append(final_turn)

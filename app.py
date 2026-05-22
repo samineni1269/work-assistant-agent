@@ -68,6 +68,7 @@ TOOLS_NAV = [
             "Send an email to [person]",
             "Schedule a meeting with [person]",
             "Reply to the latest email from [name]",
+            "Draft a reply to the latest email from [name]",
         ],
         "placeholder": "Ask about emails, calendar events, meetings, or drafts…",
     },
@@ -244,8 +245,10 @@ TOOLS_NAV = [
         "chips": [
             "Show all my open action items",
             "Show high priority items",
+            "What's due today?",
             "Extract action items from: [text]",
             "Mark item #[id] as complete",
+            "Show completed tasks",
             "Score these notifications by urgency",
         ],
         "placeholder": "View open tasks, extract action items from text, mark complete…",
@@ -790,6 +793,8 @@ body{background:#16181d;color:#d4d8e8;font-family:-apple-system,BlinkMacSystemFo
       </label>
       <!-- Tone train -->
       <button class="hdr-btn" title="Train writing style" onclick="document.getElementById('tone-panel').style.display=document.getElementById('tone-panel').style.display==='none'?'block':'none'">✍️</button>
+      <!-- History -->
+      <button class="hdr-btn" title="Conversation history" onclick="toggleHistory()">🕐</button>
       <!-- Bell -->
       <div id="bell-wrap" onclick="toggleTray()" style="position:relative">
         <button class="hdr-btn" id="bell-btn" title="Alerts">🔔</button>
@@ -797,6 +802,21 @@ body{background:#16181d;color:#d4d8e8;font-family:-apple-system,BlinkMacSystemFo
         <div id="alert-tray"></div>
       </div>
     </div>
+  </div>
+
+  <!-- History panel -->
+  <div id="hist-panel" style="display:none;position:fixed;top:0;right:0;width:300px;height:100%;
+    background:var(--bg2);border-left:1px solid var(--border);z-index:300;
+    flex-direction:column;padding:12px;gap:8px;overflow:hidden;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-weight:600;font-size:13px;">🕐 History</span>
+      <button onclick="closeHistory()" style="background:none;border:none;color:var(--fg);cursor:pointer;font-size:16px;">✕</button>
+    </div>
+    <input id="hist-search" placeholder="Search conversations…"
+      style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;
+      padding:6px 10px;color:var(--fg);font-size:12px;width:100%;box-sizing:border-box;"
+      oninput="searchHistory(this.value)">
+    <div id="hist-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
   </div>
 
   <!-- Chat / welcome -->
@@ -1409,6 +1429,66 @@ async function applyModel() {
   } catch(e) { msg.textContent = '❌ ' + e.message; msg.style.color = '#ff5555'; }
 }
 
+// ── History sidebar ───────────────────────────────────────────────────────────
+let _histOpen = false;
+
+function toggleHistory() {
+  _histOpen = !_histOpen;
+  const p = document.getElementById('hist-panel');
+  p.style.display = _histOpen ? 'flex' : 'none';
+  if (_histOpen) loadHistory();
+}
+
+function closeHistory() {
+  _histOpen = false;
+  document.getElementById('hist-panel').style.display = 'none';
+}
+
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function loadHistory(q) {
+  const tool  = state.activeTool || '';
+  const url   = q
+    ? `/history?q=${encodeURIComponent(q)}`
+    : `/history?tool_id=${encodeURIComponent(tool)}`;
+  const sessions = await fetch(url).then(r => r.json()).catch(() => []);
+  const list = document.getElementById('hist-list');
+  list.innerHTML = '';
+  if (!sessions.length) {
+    list.innerHTML = '<div style="opacity:.5;font-size:12px;text-align:center;padding:20px">No history yet</div>';
+    return;
+  }
+  sessions.forEach(s => {
+    const d = document.createElement('div');
+    d.style.cssText = 'background:var(--bg3);border-radius:6px;padding:8px 10px;cursor:pointer;'
+      + 'font-size:12px;border:1px solid transparent;';
+    const dateStr = (s.updated_at || '').slice(0, 10);
+    d.innerHTML = `<div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_escHtml(s.title)}</div>
+      <div style="opacity:.5;font-size:10px;margin-top:2px">${_escHtml(s.tool_id)} · ${s.turn_count} turns · ${dateStr}</div>`;
+    d.onmouseover = () => d.style.borderColor = 'var(--accent)';
+    d.onmouseout  = () => d.style.borderColor = 'transparent';
+    d.onclick = () => restoreSession(s.id, s.title);
+    list.appendChild(d);
+  });
+}
+
+searchHistory._t = null;
+function searchHistory(q) {
+  clearTimeout(searchHistory._t);
+  searchHistory._t = setTimeout(() => loadHistory(q || undefined), 300);
+}
+
+async function restoreSession(id, title) {
+  const turns = await fetch(`/history/${id}`).then(r => r.json()).catch(() => []);
+  const msgs = document.getElementById('messages');
+  if (!msgs) return;
+  msgs.innerHTML = `<div style="text-align:center;opacity:.4;font-size:11px;padding:8px">📂 Restored: ${_escHtml(title)}</div>`;
+  turns.forEach(t => addMsg(t.role === 'user' ? 'user' : 'assistant', t.content));
+  closeHistory();
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
   buildNav();
@@ -1461,12 +1541,24 @@ def chat():
         _jobs[job_id] = {"status": "thinking", "response": None, "warnings": []}
         history = list(_histories.get(tool_id, []))   # per-tool history, copy
 
+    # Use a stable session ID: tool_id + date, so each tool gets a daily session
+    import datetime as _dt
+    session_id = f"{tool_id}_{_dt.date.today().isoformat()}"
+
     def run():
         try:
             from agent import run_agent_turn
             response, updated, warnings = run_agent_turn(history, message, auto_confirm=True)
             with _lock:
                 _histories[tool_id] = updated
+            # Persist to conversation history store
+            if _CONV_STORE:
+                try:
+                    title = _cs_get_title(session_id) or message[:60]
+                    _cs_save_turn(session_id, tool_id, "user", message, title)
+                    _cs_save_turn(session_id, tool_id, "assistant", response, "")
+                except Exception:
+                    pass
             with _lock:
                 _jobs[job_id] = {"status": "done", "response": response, "warnings": warnings}
         except BaseException as exc:
@@ -1662,6 +1754,130 @@ def guardrails_get():
 def guardrails_toggle(name):
     from tools.guardrails import toggle
     return jsonify(toggle(name))
+
+
+# ── Conversation history ─────────────────────────────────────────────────────
+
+try:
+    from tools.conversation_store import (
+        save_turn as _cs_save_turn,
+        get_session_turns as _cs_get_turns,
+        list_sessions as _cs_list_sessions,
+        search_sessions as _cs_search_sessions,
+        delete_session as _cs_delete_session,
+        get_session_title_from_first_user_message as _cs_get_title,
+    )
+    _CONV_STORE = True
+except Exception:
+    _CONV_STORE = False
+
+
+@app.route("/history")
+def history_list():
+    if not _CONV_STORE:
+        return jsonify([])
+    tool_id = request.args.get("tool_id", "").strip() or None
+    q       = request.args.get("q", "").strip()
+    if q:
+        sessions = _cs_search_sessions(q)
+    else:
+        sessions = _cs_list_sessions(tool_id=tool_id)
+    return jsonify(sessions)
+
+
+@app.route("/history/<session_id>")
+def history_get(session_id):
+    if not _CONV_STORE:
+        return jsonify([])
+    return jsonify(_cs_get_turns(session_id))
+
+
+@app.route("/history/<session_id>", methods=["DELETE"])
+def history_delete(session_id):
+    if not _CONV_STORE:
+        return jsonify({"ok": False})
+    _cs_delete_session(session_id)
+    return jsonify({"ok": True})
+
+
+# ── Tone-matched email draft reply ────────────────────────────────────────────
+
+@app.route("/draft-reply", methods=["POST"])
+def draft_reply():
+    """Generate a tone-matched draft email reply.
+    Body: {"email_body": "...", "instruction": "...optional..."}
+    Returns: {"draft": "..."}
+    """
+    data        = request.get_json(force=True)
+    email_body  = data.get("email_body", "").strip()
+    instruction = data.get("instruction", "").strip()
+    if not email_body:
+        return jsonify({"error": "email_body required"}), 400
+    try:
+        from tools.tone_learner import get_tone_instructions
+        from tools.llm_provider import get_provider
+        tone_guide = get_tone_instructions()
+        provider   = get_provider()
+        system = (
+            "You are a professional email drafting assistant. "
+            "Write in the user's personal style as described below.\n\n"
+            + tone_guide
+            if tone_guide else
+            "You are a professional email drafting assistant. Write clearly and concisely."
+        )
+        prompt = (
+            f"Draft a reply to this email:\n\n{email_body}"
+            + (f"\n\nAdditional instruction: {instruction}" if instruction else "")
+            + "\n\nWrite only the reply body — no subject line, no sign-off instructions."
+        )
+        _, draft = provider.run_turn(
+            system_prompt=system,
+            history=[{"role": "user", "content": prompt}],
+            tools=[],
+        )
+        return jsonify({"draft": draft.strip()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Trigger automation rules ──────────────────────────────────────────────────
+
+@app.route("/triggers")
+def triggers_list():
+    try:
+        from tools.trigger_engine import list_rules, get_trigger_log
+        return jsonify({"rules": list_rules(), "log": get_trigger_log(20)})
+    except Exception as e:
+        return jsonify({"rules": [], "log": [], "error": str(e)})
+
+
+@app.route("/triggers", methods=["POST"])
+def triggers_add():
+    data = request.get_json(force=True)
+    try:
+        from tools.trigger_engine import add_rule
+        rule = add_rule(
+            name        = data["name"],
+            source      = data.get("source", "any"),
+            event_type  = data.get("event_type", "any"),
+            condition   = data.get("condition", {}),
+            action      = data["action"],
+            action_args = data.get("action_args", {}),
+        )
+        return jsonify(rule)
+    except KeyError as e:
+        return jsonify({"error": f"Missing field: {e}"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/triggers/<int:rule_id>", methods=["DELETE"])
+def triggers_delete(rule_id):
+    try:
+        from tools.trigger_engine import delete_rule
+        return jsonify(delete_rule(rule_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -15,6 +15,7 @@ Usage:
   from tools.memory import get_memory_context, save_fact, extract_and_save_facts
 """
 
+import copy
 import re
 import json
 import datetime
@@ -48,7 +49,7 @@ def load_memory() -> dict:
             return data
         except Exception:
             pass
-    return dict(_EMPTY)
+    return copy.deepcopy(_EMPTY)
 
 
 def save_memory(mem: dict):
@@ -205,6 +206,65 @@ def extract_and_save_facts(user_message: str, assistant_response: str = ""):
                 changed = True
             except Exception:
                 pass
+
+    if changed:
+        save_memory(mem)
+
+    # Also run regex-based entity extraction
+    try:
+        auto_save_entities(user_message, assistant_response)
+    except Exception:
+        pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ENTITY EXTRACTION — fast regex-based, no LLM required
+# ══════════════════════════════════════════════════════════════════════════════
+
+def extract_entities(text: str) -> dict:
+    """
+    Extract named entities from text using regex patterns.
+    Returns dict with: people (list), emails (list), projects (list).
+    No LLM call — fast and always available.
+    """
+    # Email addresses
+    emails = re.findall(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b', text)
+    # Two consecutive title-case words (names), not at sentence start
+    names = re.findall(r'(?<!\.\s)\b([A-Z][a-z]{1,20}\s+[A-Z][a-z]{1,20})\b', text)
+    # Project-like terms: "Project X", "Sprint 12", ticket IDs like "PROJ-123"
+    projects = re.findall(
+        r'\b(?:Project|Sprint|Release|Milestone|Epic|Phase)\s+[\w.\-]+\b', text, re.I
+    )
+    tickets = re.findall(r'\b[A-Z]{2,10}-\d{1,6}\b', text)
+    return {
+        "emails":   list(set(emails)),
+        "people":   list(set(names)),
+        "projects": list(set(projects + tickets)),
+    }
+
+
+def auto_save_entities(user_message: str, assistant_response: str) -> None:
+    """
+    Extract entities from a conversation turn and persist to memory.
+    Saves email → person mapping and project references automatically.
+    """
+    combined = f"{user_message}\n{assistant_response}"
+    entities = extract_entities(combined)
+    mem = load_memory()
+    changed = False
+
+    for email in entities["emails"]:
+        # Derive a display name from the local part of the email
+        local = email.split("@")[0].replace(".", " ").replace("_", " ").title()
+        if local and local not in mem["people"]:
+            mem["people"][local] = {"email": email, "notes": "auto-extracted"}
+            changed = True
+
+    for proj in entities["projects"]:
+        key = proj.strip()
+        if key and key not in mem["context"]:
+            mem["context"][key] = "seen in conversation"
+            changed = True
 
     if changed:
         save_memory(mem)
