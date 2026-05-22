@@ -69,6 +69,22 @@ def _analytics():
     from tools import analytics
     return analytics
 
+def _slack():
+    from tools import slack_tool
+    return slack_tool
+
+def _notion():
+    from tools import notion_tool
+    return notion_tool
+
+def _actions():
+    from tools import action_items
+    return action_items
+
+def _briefing():
+    from tools import briefing
+    return briefing
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TOOL SETS — read vs write (provider-agnostic)
@@ -99,6 +115,19 @@ READ_TOOLS = {
     # Super-agent reads
     "search_knowledge_base", "browse_url", "search_web",
     "get_memory_summary", "get_analytics_summary",
+    # Slack reads
+    "list_slack_channels", "get_slack_messages", "get_slack_thread",
+    "list_slack_dms", "get_slack_dm_history", "search_slack", "get_slack_user_info",
+    # Notion reads
+    "search_notion", "get_notion_page", "list_notion_databases", "query_notion_database",
+    # Action items / priority scoring
+    "get_my_action_items", "extract_action_items", "score_notifications",
+    # Calendar scheduling
+    "find_free_slots",
+    # SharePoint reads
+    "get_sharepoint_sites",
+    # Webhook events
+    "get_webhook_events",
 }
 
 # WRITE tools — always show preview and require user confirmation
@@ -111,6 +140,7 @@ WRITE_TOOLS = {
     # Word / PowerPoint writes
     "create_word_document", "update_word_document",
     "create_presentation", "add_slide_to_presentation",
+    "upload_file_to_sharepoint",
     # GitHub writes
     "create_github_issue", "add_pr_review", "merge_pull_request",
     # Linear writes
@@ -120,6 +150,14 @@ WRITE_TOOLS = {
     "create_zoom_meeting", "create_google_meet",
     # Memory writes
     "update_memory_entry",
+    # Slack writes
+    "send_slack_message",
+    # Notion writes
+    "create_notion_page",
+    # Action items writes
+    "complete_action_item", "save_action_items",
+    # Briefing
+    "send_morning_briefing",
 }
 
 
@@ -133,6 +171,36 @@ def dispatch_tool(name: str, args: dict) -> str:
     zoom = _zoom()
 
     dispatch = {
+        # Slack
+        "list_slack_channels":    lambda: _slack().list_slack_channels(**args),
+        "get_slack_messages":     lambda: _slack().get_slack_messages(**args),
+        "get_slack_thread":       lambda: _slack().get_slack_thread(**args),
+        "list_slack_dms":         lambda: _slack().list_slack_dms(**args),
+        "get_slack_dm_history":   lambda: _slack().get_slack_dm_history(**args),
+        "search_slack":           lambda: _slack().search_slack(**args),
+        "get_slack_user_info":    lambda: _slack().get_slack_user_info(**args),
+        "send_slack_message":     lambda: _slack().send_slack_message(**args),
+        # Notion
+        "search_notion":          lambda: _notion().search_notion(**args),
+        "get_notion_page":        lambda: _notion().get_notion_page(**args),
+        "create_notion_page":     lambda: _notion().create_notion_page(**args),
+        "list_notion_databases":  lambda: _notion().list_notion_databases(**args),
+        "query_notion_database":  lambda: _notion().query_notion_database(**args),
+        # Action items
+        "extract_action_items":   lambda: _actions().extract_action_items(**args),
+        "save_action_items":      lambda: _actions().save_action_items(**args),
+        "get_my_action_items":    lambda: _actions().get_my_action_items(**args),
+        "complete_action_item":   lambda: _actions().complete_action_item(**args),
+        "score_notifications":    lambda: _actions().score_notifications(**args),
+        # Briefing
+        "send_morning_briefing":  lambda: _briefing().send_morning_briefing(**args),
+        # Webhook events
+        "get_webhook_events": lambda: __import__("tools.webhook_server", fromlist=["get_recent_events"]).get_recent_events(**args),
+        # Calendar scheduling
+        "find_free_slots":        lambda: ms.find_free_slots(**args),
+        # SharePoint sites
+        "get_sharepoint_sites":   lambda: ms.get_sharepoint_sites(**args),
+
         # Outlook
         "get_emails":            lambda: ms.get_emails(**args),
         "get_email_body":        lambda: ms.get_email_body(**args),
@@ -149,9 +217,11 @@ def dispatch_tool(name: str, args: dict) -> str:
         "get_channel_messages":  lambda: ms.get_channel_messages(**args),
         "post_channel_message":  lambda: ms.post_channel_message(**args),
         # SharePoint
-        "search_sharepoint":     lambda: ms.search_sharepoint(**args),
-        "list_sharepoint_files": lambda: ms.list_sharepoint_files(**args),
+        "search_sharepoint":          lambda: ms.search_sharepoint(**args),
+        "list_sharepoint_files":      lambda: ms.list_sharepoint_files(**args),
+        "upload_file_to_sharepoint":  lambda: ms.upload_file_to_sharepoint(**args),
         # Excel
+        "create_excel_workbook": lambda: ms.create_excel_workbook(**args),
         "read_excel_sheet":      lambda: ms.read_excel_sheet(**args),
         "write_excel_cell":      lambda: ms.write_excel_cell(**args),
         "append_excel_row":      lambda: ms.append_excel_row(**args),
@@ -403,6 +473,25 @@ def confirm_write_operation(tool_name: str, args: dict) -> bool:
             f"   End:       {a.get('end')}\n"
             f"   Attendees: {', '.join(a.get('attendees', [])) or 'none'}"
         ),
+        "send_slack_message": lambda a: (
+            f"💬  Send Slack message\n"
+            f"   Channel: {a.get('channel_id')}\n"
+            f"   Text:    {a.get('text', '')[:300]}\n"
+            f"   Thread:  {a.get('thread_ts', 'none')}"
+        ),
+        "create_notion_page": lambda a: (
+            f"📓  Create Notion page\n"
+            f"   Parent:  {a.get('parent_id')}\n"
+            f"   Title:   {a.get('title')}\n"
+            f"   Content preview:\n\n{_indent(a.get('content', '')[:300], 6)}"
+        ),
+        "complete_action_item": lambda a: (
+            f"✅  Mark action item #{a.get('item_id')} as completed"
+        ),
+        "send_morning_briefing": lambda a: (
+            f"📧  Send daily briefing email\n"
+            f"   To: {a.get('recipient', '(from BRIEFING_EMAIL env)')}"
+        ),
     }
 
     preview_fn   = previews.get(tool_name)
@@ -440,40 +529,131 @@ def _build_system_prompt() -> str:
 
     memory_ctx = get_memory_context()
     tone_guide = get_tone_instructions()
+    today = datetime.datetime.now().strftime("%A, %d %B %Y — %H:%M")
 
-    base = f"""You are a professional work assistant for a corporate employee.
-Today is {datetime.datetime.now().strftime("%A, %d %B %Y")}.
+    base = f"""# Work Assistant — System Prompt
+Today: {today}
 
-You have access to the following tools:
-- Outlook: read emails, search emails, send emails, reply to emails
-- Calendar: list events, create meetings (Teams or Google Meet)
-- Teams: list chats, read messages, send messages, list channels, post to channels
-- SharePoint: search documents, list files
-- Excel (OneDrive): read sheets, write cells, append rows
-- Jira: list my issues, search issues, view issue details, create issues, update issues, transition status, add comments
-- Confluence: search pages, read pages, create pages, update pages
-- Word (.docx): read documents, create documents, update documents
-- PowerPoint (.pptx): read presentations, create presentations, add slides
-- GitHub: notifications, pull requests, reviews, issues, workflow runs
-- Linear: issues, projects, teams, workflow states
-- Zoom: meetings, recordings
-- Google Meet: calendar events with Meet links
+## Identity
+You are a senior work assistant with deep expertise across software engineering workflows,
+corporate communication, and project management. You are sharp, efficient, and professional —
+you cut through noise, surface what matters, and act decisively within your constraints.
+You never make things up. If you don't have data, you fetch it.
 
-Your principles:
-1. READ operations (fetching, searching, listing) — execute immediately without asking.
-2. WRITE operations (sending, creating, updating) — ALWAYS show a preview first and wait for confirmation.
-3. Be concise and professional. Format results clearly using markdown.
-4. If you need more information to complete a task (e.g. which project, which chat), ask the user a specific question.
-5. For daily briefing, always fetch: today's calendar events, unread emails (top 10), and my Jira issues (In Progress).
-6. For standup summary, fetch: my Jira issues updated in the last 24 hours, any blockers, and today's calendar.
-7. Never guess IDs — if you don't know a chat ID, list chats first to find the right one.
+## Tools Available
+### Communication
+- **Outlook** — get_emails, get_email_body, search_emails, send_email
+- **Teams** — get_teams_chats, get_chat_messages, send_teams_message, list_teams, get_channel_messages, post_channel_message
+- **Slack** — list_slack_channels, get_slack_messages, search_slack, send_slack_message, get_slack_dm_history
+
+### Calendar & Scheduling
+- **Outlook Calendar** — get_calendar_events, create_calendar_event
+- **Smart Scheduling** — find_free_slots (finds when all attendees are free)
+- **Google Calendar** — list_google_calendar_events, create_google_meet
+- **Zoom** — list_zoom_meetings, get_zoom_meeting, create_zoom_meeting, list_zoom_recordings
+
+### Files & Documents
+- **SharePoint/OneDrive** — search_sharepoint, list_sharepoint_files, get_sharepoint_sites, upload_file_to_sharepoint
+- **Excel** — create_excel_workbook, read_excel_sheet, write_excel_cell, append_excel_row, list_excel_sheets
+- **Word (.docx)** — create_word_document, read_word_document, update_word_document, list_word_headings
+- **PowerPoint (.pptx)** — create_presentation, read_presentation, add_slide_to_presentation, get_presentation_summary
+
+### Project Management
+- **Jira** — get_my_jira_issues, search_jira, get_jira_issue, create_jira_issue, update_jira_issue, transition_jira_issue, add_jira_comment, get_jira_projects
+- **Linear** — get_my_linear_issues, search_linear_issues, get_linear_issue, create_linear_issue, update_linear_issue, transition_linear_issue, add_linear_comment, list_linear_teams, list_linear_projects
+- **Notion** — search_notion, get_notion_page, create_notion_page, list_notion_databases, query_notion_database
+
+### Engineering
+- **GitHub** — get_github_notifications, get_my_open_prs, get_my_review_requests, list_my_repos, list_pull_requests, get_pull_request, get_pr_checks, get_repo_workflow_runs, search_github, list_my_github_issues, create_github_issue, add_pr_review, merge_pull_request
+
+### Intelligence & Productivity
+- **Action Items** — extract_action_items (extract TODOs from text), get_my_action_items, complete_action_item
+- **Priority Scoring** — score_notifications (scores urgency of a list of notifications)
+- **Knowledge Base** — search_knowledge_base (search uploaded docs/policies)
+- **Memory** — update_memory_entry, get_memory_summary
+- **Analytics** — get_analytics_summary
+- **Web** — browse_url, search_web
+
+## Behavioural Rules
+
+### Rule 1 — READ vs WRITE
+- **READ** (fetching, listing, searching, reading) → execute immediately, no confirmation needed.
+- **WRITE** (sending, creating, updating, deleting, merging) → ALWAYS show a clear preview and wait for "yes" before proceeding.
+- When in doubt, treat it as WRITE.
+
+### Rule 2 — Never guess IDs
+If you need a chat ID, team ID, channel ID, issue key, or any identifier you don't have:
+fetch the parent list first to find it. Example: asked to "read messages from Alex" → call
+get_teams_chats() first, find Alex's chat, then call get_chat_messages(chat_id=...).
+
+### Rule 3 — Parallel execution
+When the user's request requires multiple independent data fetches (e.g. briefing = emails +
+calendar + Jira), call ALL read tools simultaneously in a single response — do not wait for
+one before calling the next.
+
+### Rule 4 — Ambiguity resolution
+If a request is ambiguous in a way that could lead to the wrong action (e.g. "delete that
+issue" without specifying which), ask ONE targeted clarifying question before proceeding.
+Do not ask multiple questions at once.
+
+### Rule 5 — Response format
+- Use **markdown** with clear headers (##), bullet points, and bold for key info.
+- Keep responses concise — lead with the answer, then details.
+- For lists of items (emails, issues, notifications), use a structured table or bullet list
+  with the most important info first.
+- For action-oriented responses, end with a "**What next?**" suggestion when relevant.
+
+### Rule 6 — Proactive intelligence
+After fetching notifications, emails, or issues, automatically apply priority scoring if
+there are 5+ items — surface what needs action today without being asked.
+After reading long emails or meeting notes, offer to extract action items.
+
+### Rule 7 — Daily briefing
+When asked for briefing, fetch ALL of these in parallel:
+1. today's calendar events (get_calendar_events)
+2. unread emails top 10 (get_emails unread_only=True)
+3. my Jira issues In Progress (get_my_jira_issues)
+4. GitHub notifications (get_github_notifications)
+Format with clear sections: 📅 Calendar · 📧 Emails · 🎫 Jira · 🔔 GitHub
+
+### Rule 8 — Standup summary
+When asked for standup, fetch:
+1. Jira issues updated in last 24h
+2. My open GitHub PRs
+3. Today's meetings
+Format as a clean standup: **Yesterday / Today / Blockers**
+
+## Tool Chaining Examples
+
+### Example A — "What did Alex say in our latest chat?"
+WRONG: Ask "what is Alex's chat ID?"
+RIGHT: Call get_teams_chats() → find Alex → call get_chat_messages(chat_id="...")
+
+### Example B — "Schedule a 30-min meeting with bob@company.com this week"
+RIGHT: Call find_free_slots(attendee_emails=["bob@company.com"], duration_minutes=30, days_ahead=5)
+→ present options → call create_calendar_event() after confirmation
+
+### Example C — "Summarise my emails and create Jira tickets for anything actionable"
+RIGHT: Call get_emails() and get_my_jira_issues() in PARALLEL
+→ identify actionable emails
+→ for each: show preview of proposed Jira ticket
+→ create only after confirmation
+
+### Example D — "What needs my attention right now?"
+RIGHT: Call get_github_notifications(), get_emails(unread_only=True), get_my_jira_issues()
+in PARALLEL → call score_notifications() on the combined results → present ranked list
+
+## Error Handling
+- If a tool returns an error, explain it briefly and suggest the fix (e.g. "token expired — run fix_teams_auth.command").
+- If an API key is missing, tell the user which .env variable to set.
+- Never crash silently — always report what went wrong.
 """
 
     if memory_ctx:
-        base += f"\n\n{memory_ctx}"
+        base += f"\n\n## What I Know About You\n{memory_ctx}"
 
     if tone_guide:
-        base += f"\n\n{tone_guide}"
+        base += f"\n\n## Your Communication Style\n{tone_guide}"
 
     return base
 
@@ -481,6 +661,62 @@ Your principles:
 # ══════════════════════════════════════════════════════════════════════════════
 # AGENTIC LOOP — multi-provider function calling with multi-turn
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _summarise_history(history: list, provider) -> list:
+    """
+    Keep the last 8 turns verbatim; compress older turns into a rolling summary.
+    This prevents context drift in long sessions without losing key facts.
+    Returns a new history list safe to pass to the LLM.
+    """
+    KEEP_RECENT = 8   # number of recent messages to keep verbatim
+    if len(history) <= KEEP_RECENT:
+        return history
+
+    old_turns = history[:-KEEP_RECENT]
+    recent    = history[-KEEP_RECENT:]
+
+    # Build a plain text transcript of old turns
+    transcript_lines = []
+    for msg in old_turns:
+        role = msg.get("role", "")
+        if role == "user":
+            transcript_lines.append(f"User: {msg.get('content','')}")
+        elif role == "assistant" and msg.get("content"):
+            transcript_lines.append(f"Assistant: {msg.get('content','')}")
+        elif role == "assistant" and msg.get("tool_calls"):
+            names = [tc.get("name","?") for tc in msg.get("tool_calls", [])]
+            transcript_lines.append(f"Assistant called tools: {', '.join(names)}")
+        elif role == "tool":
+            pass  # skip raw tool results — too noisy
+    transcript = "\n".join(transcript_lines)
+
+    if not transcript.strip():
+        return history
+
+    # Summarise with a fast prompt
+    summary_prompt = (
+        "Summarise the following conversation history in under 150 words. "
+        "Focus on: what the user asked, what data was fetched, what actions were taken, "
+        "and any important facts mentioned (names, IDs, decisions). "
+        "Write in third person, past tense. Be factual and brief.\n\n"
+        f"---\n{transcript}\n---"
+    )
+
+    try:
+        _, summary_text = provider.run_turn(
+            system_prompt="You are a concise conversation summariser.",
+            history=[{"role": "user", "content": summary_prompt}],
+            tools=[],
+        )
+        summary_msg = {
+            "role": "user",
+            "content": f"[Earlier conversation summary]\n{summary_text.strip()}"
+        }
+        return [summary_msg] + recent
+    except Exception:
+        # On failure, just drop old turns — better than crashing
+        return recent
+
 
 def run_agent_turn(conversation_history: list, user_message: str,
                    auto_confirm: bool = False) -> tuple[str, list, list]:
@@ -500,7 +736,7 @@ def run_agent_turn(conversation_history: list, user_message: str,
     Returns (final_response_text, updated_history, guardrail_warnings).
     guardrail_warnings is a list of warning strings (may be empty).
     """
-    from tools.llm_provider import TOOLS, get_provider
+    from tools.llm_provider import TOOLS, get_provider, get_fast_provider, should_use_fast_model
     from tools.guardrails import (
         check_input, check_tool_call, process_tool_result,
         audit_write, scrub_output,
@@ -520,7 +756,9 @@ def run_agent_turn(conversation_history: list, user_message: str,
         return reason, conversation_history, warnings
 
     try:
-        provider = get_provider()
+        # Model routing: use fast/cheap model for simple single-step reads
+        _use_fast = should_use_fast_model(user_message, len(conversation_history))
+        provider = get_fast_provider() if _use_fast else get_provider()
     except RuntimeError as e:
         console.print(f"\n[red]❌  LLM provider error: {e}[/red]")
         console.print("[dim]Set at least one of: GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY in your .env[/dim]\n")
@@ -528,6 +766,9 @@ def run_agent_turn(conversation_history: list, user_message: str,
 
     # Add user message to neutral history
     conversation_history.append({"role": "user", "content": user_message})
+
+    # ── Summarise long histories to keep context focused ──────────────────────
+    working_history = _summarise_history(conversation_history, provider)
 
     tool_call_count = 0   # tracked for bulk_protection
 
@@ -537,12 +778,14 @@ def run_agent_turn(conversation_history: list, user_message: str,
         # run_turn returns (tool_calls, text)
         #   tool_calls: list of (name, args, call_id) — non-empty when model wants a tool
         #   text: final response string — non-empty when model is done
-        tool_calls, text = provider.run_turn(system_prompt, conversation_history, TOOLS)
+        tool_calls, text = provider.run_turn(system_prompt, working_history, TOOLS)
 
         if not tool_calls:
             # ── Guardrail 2: scrub secrets from final response ────────────────
             text = scrub_output(text)
-            conversation_history.append({"role": "assistant", "content": text})
+            final_turn = {"role": "assistant", "content": text}
+            conversation_history.append(final_turn)
+            working_history.append(final_turn)
 
             # ── Post-turn: learn from this exchange ───────────────────────────
             try:
@@ -564,15 +807,17 @@ def run_agent_turn(conversation_history: list, user_message: str,
 
             return text, conversation_history, warnings
 
-        # Model wants to call tools — record the assistant turn
-        conversation_history.append({
+        # Model wants to call tools — record in BOTH histories
+        tool_turn = {
             "role": "assistant",
             "content": None,
             "tool_calls": [
                 {"id": tc_id, "name": name, "args": args}
                 for name, args, tc_id in tool_calls
             ],
-        })
+        }
+        conversation_history.append(tool_turn)
+        working_history.append(tool_turn)
 
         # Separate reads (parallelisable) from writes (must be sequential)
         read_calls  = [(n, a, i) for n, a, i in tool_calls if n not in WRITE_TOOLS]
@@ -634,12 +879,14 @@ def run_agent_turn(conversation_history: list, user_message: str,
                 t_name, t_result = tool_results[tc_id]
             else:
                 t_name, t_result = name, json.dumps({"status": "no_result"})
-            conversation_history.append({
+            result_turn = {
                 "role": "tool",
                 "call_id": tc_id,
                 "name": t_name,
                 "content": t_result,
-            })
+            }
+            conversation_history.append(result_turn)
+            working_history.append(result_turn)
 
     # (loop continues until model returns a text-only response)
 

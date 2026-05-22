@@ -31,3 +31,15 @@ chromadb>=0.5.0                  # RAG knowledge base vector store
 sentence-transformers>=3.0.0     # Text embeddings for RAG (all-MiniLM-L6-v2)
 playwright>=1.44.0               # Browser automation (run: playwright install chromium)
 pypdf>=4.2.0                     # PDF text extraction for knowledge base
+
+# ── Scheduled briefing ────────────────────────────────────────────────────────
+apscheduler>=3.10.0              # Daily briefing scheduler (tools/briefing.py)
+
+# ── Slack integration ─────────────────────────────────────────────────────────
+# Uses requests (already above) — no extra dep needed for Slack Web API
+
+# ── Notion integration ────────────────────────────────────────────────────────
+# Uses requests (already above) — no extra dep needed for Notion REST API
+
+# ── Webhook listener ──────────────────────────────────────────────────────────
+# Uses Flask (already above) — no extra dep needed for GitHub/Jira webhooks

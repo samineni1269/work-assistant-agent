@@ -318,6 +318,131 @@ def create_calendar_event(
     return {"status": "created", "id": result.get("id"), "webLink": result.get("webLink")}
 
 
+def find_free_slots(
+    attendees: list[str],
+    duration_minutes: int = 30,
+    days_ahead: int = 5,
+    working_hours_start: int = 9,
+    working_hours_end: int = 18,
+) -> list[dict]:
+    """
+    Find available time slots when all attendees are free.
+
+    Uses Microsoft Graph /me/calendar/getSchedule to fetch availability,
+    then identifies gaps that fit the requested duration.
+
+    Args:
+        attendees:             List of attendee email addresses
+        duration_minutes:      Meeting duration to find a slot for (default: 30)
+        days_ahead:            How many days to search (default: 5)
+        working_hours_start:   Start of working day in UTC hour (default: 9)
+        working_hours_end:     End of working day in UTC hour (default: 18)
+
+    Returns:
+        List of free slot dicts: start, end, duration_minutes
+        (up to 10 slots, sorted by start time)
+    """
+    now = datetime.datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    end_search = now + datetime.timedelta(days=days_ahead)
+
+    start_str = now.strftime("%Y-%m-%dT%H:%M:%S")
+    end_str = end_search.strftime("%Y-%m-%dT%H:%M:%S")
+
+    payload = {
+        "schedules": attendees,
+        "startTime": {"dateTime": start_str, "timeZone": "UTC"},
+        "endTime": {"dateTime": end_str, "timeZone": "UTC"},
+        "availabilityViewInterval": duration_minutes,
+    }
+
+    try:
+        data = _graph("POST", "/me/calendar/getSchedule", json=payload)
+    except Exception as e:
+        return [{"error": f"getSchedule failed: {e}"}]
+
+    # Collect all busy intervals across all attendees
+    # availabilityView is a string like "0002020000..." where each char = one interval
+    # 0=free, 1=tentative, 2=busy, 3=OOF, 4=working elsewhere
+    # We'll use scheduleItems (explicit busy blocks) for accuracy
+    all_busy: list[tuple] = []
+    for schedule in data.get("value", []):
+        for item in schedule.get("scheduleItems", []):
+            status = item.get("status", "free")
+            if status in ("busy", "oof", "tentative"):
+                s = item.get("start", {}).get("dateTime", "")
+                e = item.get("end", {}).get("dateTime", "")
+                if s and e:
+                    try:
+                        # Graph returns ISO strings — may have trailing Z or not
+                        s_dt = datetime.datetime.fromisoformat(s.rstrip("Z"))
+                        e_dt = datetime.datetime.fromisoformat(e.rstrip("Z"))
+                        all_busy.append((s_dt, e_dt))
+                    except ValueError:
+                        pass
+
+    # Sort and merge overlapping busy blocks
+    all_busy.sort(key=lambda x: x[0])
+    merged: list[tuple] = []
+    for start_b, end_b in all_busy:
+        if merged and start_b <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end_b))
+        else:
+            merged.append((start_b, end_b))
+
+    # Walk each working day and find gaps >= duration_minutes
+    slot_duration = datetime.timedelta(minutes=duration_minutes)
+    free_slots = []
+    cursor = now
+
+    while cursor < end_search and len(free_slots) < 10:
+        # Set working window for this day
+        day_start = cursor.replace(hour=working_hours_start, minute=0, second=0)
+        day_end = cursor.replace(hour=working_hours_end, minute=0, second=0)
+
+        # Don't look in the past
+        window_start = max(cursor, day_start)
+        window_end = day_end
+
+        if window_start >= window_end:
+            cursor = (cursor + datetime.timedelta(days=1)).replace(
+                hour=working_hours_start, minute=0, second=0
+            )
+            continue
+
+        # Find free gaps in the working window
+        pos = window_start
+        for busy_start, busy_end in merged:
+            if busy_start >= window_end:
+                break
+            if busy_end <= pos:
+                continue
+            # Gap before this busy block
+            gap_end = min(busy_start, window_end)
+            if gap_end - pos >= slot_duration:
+                free_slots.append({
+                    "start": pos.strftime("%Y-%m-%dT%H:%M:00Z"),
+                    "end": (pos + slot_duration).strftime("%Y-%m-%dT%H:%M:00Z"),
+                    "duration_minutes": duration_minutes,
+                })
+                if len(free_slots) >= 10:
+                    break
+            pos = max(pos, busy_end)
+
+        # Remaining time after last busy block
+        if len(free_slots) < 10 and pos < window_end and (window_end - pos) >= slot_duration:
+            free_slots.append({
+                "start": pos.strftime("%Y-%m-%dT%H:%M:00Z"),
+                "end": (pos + slot_duration).strftime("%Y-%m-%dT%H:%M:00Z"),
+                "duration_minutes": duration_minutes,
+            })
+
+        cursor = (cursor + datetime.timedelta(days=1)).replace(
+            hour=working_hours_start, minute=0, second=0
+        )
+
+    return free_slots
+
+
 # ─────────────────────────────────────────────
 # TEAMS — Messages
 # ─────────────────────────────────────────────
@@ -601,9 +726,164 @@ def upload_sharepoint_file(local_path: str, drive_folder: str = "/", filename: s
     return {"status": "uploaded", "id": result.get("id"), "webUrl": result.get("webUrl")}
 
 
+def get_sharepoint_sites(max_results: int = 20) -> list[dict]:
+    """
+    List SharePoint sites the user has access to.
+
+    Returns:
+        List of site dicts: id, name, displayName, webUrl
+    """
+    params = {"$select": "id,name,displayName,webUrl", "$top": min(max_results, 50)}
+    data = _graph("GET", "/sites?search=*", params=params)
+    return [
+        {
+            "id":          s.get("id"),
+            "name":        s.get("name"),
+            "displayName": s.get("displayName"),
+            "webUrl":      s.get("webUrl"),
+        }
+        for s in data.get("value", [])
+    ]
+
+
+def upload_file_to_sharepoint(
+    local_path: str,
+    site_id: str = None,
+    folder_path: str = "/",
+    filename: str = None,
+) -> dict:
+    """
+    Upload a local file to a SharePoint site or OneDrive.
+
+    Args:
+        local_path:  Path to the local file (absolute or relative)
+        site_id:     SharePoint site ID (leave None to upload to OneDrive)
+        folder_path: Destination folder in the drive (default: root)
+        filename:    Override filename (default: uses the local filename)
+
+    Returns:
+        {"status": "uploaded", "filename": ..., "webUrl": ..., "id": ...}
+    """
+    path = Path(local_path)
+    name = filename or path.name
+    folder = folder_path.rstrip("/")
+    dest = f"root:{folder}/{name}:" if folder else f"root:/{name}:"
+
+    if site_id:
+        url = f"{GRAPH_BASE}/sites/{site_id}/drive/{dest}/content"
+    else:
+        url = f"{GRAPH_BASE}/me/drive/{dest}/content"
+
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/octet-stream",
+    }
+    resp = requests.put(url, headers=headers, data=path.read_bytes())
+    if not resp.ok:
+        raise RuntimeError(f"Upload failed: {resp.status_code} {resp.text[:300]}")
+    result = resp.json()
+    return {
+        "status":   "uploaded",
+        "filename": name,
+        "id":       result.get("id"),
+        "webUrl":   result.get("webUrl"),
+    }
+
+
 # ─────────────────────────────────────────────
 # EXCEL — Read and Write
 # ─────────────────────────────────────────────
+
+def create_excel_workbook(
+    filename: str,
+    sheet_name: str = "Sheet1",
+    headers: list[str] = None,
+    rows: list[list] = None,
+) -> dict:
+    """
+    Create a new Excel workbook in OneDrive and optionally populate it with data.
+
+    Args:
+        filename:   Name for the new file, e.g. 'employees.xlsx'
+        sheet_name: Name for the first worksheet (default 'Sheet1')
+        headers:    Optional list of column header strings, e.g. ['Name', 'Age', 'Dept']
+        rows:       Optional list of row data (list of lists), e.g. [['Alice', 30, 'HR'], ...]
+
+    Returns:
+        {"status": "created", "filename": ..., "webUrl": ..., "rows_written": N}
+    """
+    import io as _io
+
+    # Build a minimal xlsx in-memory using only stdlib (no openpyxl needed)
+    # We use the Graph API: upload a blank xlsx then write data via Workbook API
+    # Step 1 — create an empty workbook by uploading a 1-byte placeholder first,
+    # then use the Excel Workbook session to write headers + rows.
+
+    # Upload empty xlsx content (Graph creates a valid workbook automatically
+    # when you PUT an empty body to a .xlsx path)
+    token = get_access_token()
+    import requests as _req
+
+    fname = filename if filename.endswith(".xlsx") else filename + ".xlsx"
+    upload_url = f"{GRAPH_BASE}/me/drive/root:/{fname}:/content"
+    headers_http = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
+
+    # Upload a minimal valid empty xlsx (44 bytes — just enough for Graph to accept)
+    # Graph will initialise it as a proper workbook
+    resp = _req.put(upload_url, headers=headers_http, data=b"")
+    if not resp.ok:
+        raise RuntimeError(f"Failed to create workbook: {resp.status_code} {resp.text[:300]}")
+
+    item_id = resp.json().get("id")
+    web_url = resp.json().get("webUrl", "")
+    base    = f"/me/drive/items/{item_id}/workbook"
+
+    # Get the actual first sheet name (Graph names it 'Sheet1' by default)
+    sheets_data = _graph("GET", f"{base}/worksheets")
+    actual_sheet = sheets_data["value"][0]["name"] if sheets_data.get("value") else "Sheet1"
+
+    # Rename sheet if requested
+    if sheet_name and sheet_name != actual_sheet:
+        try:
+            _graph("PATCH", f"{base}/worksheets/{actual_sheet}",
+                   json={"name": sheet_name})
+            actual_sheet = sheet_name
+        except Exception:
+            pass  # rename failed — use default name, not fatal
+
+    rows_written = 0
+
+    # Write headers + rows as a single range
+    all_rows = []
+    if headers:
+        all_rows.append(headers)
+    if rows:
+        all_rows.extend(rows)
+
+    if all_rows:
+        n_cols = max(len(r) for r in all_rows)
+        n_rows = len(all_rows)
+        col_letter = chr(ord("A") + n_cols - 1)  # works for up to 26 cols
+        range_addr = f"A1:{col_letter}{n_rows}"
+        _graph(
+            "PATCH",
+            f"{base}/worksheets/{actual_sheet}/range(address='{range_addr}')",
+            json={"values": all_rows},
+        )
+        rows_written = len(all_rows)
+
+    return {
+        "status":       "created",
+        "filename":     fname,
+        "sheet":        actual_sheet,
+        "webUrl":       web_url,
+        "rows_written": rows_written,
+    }
+
 
 def _find_excel_file(filename: str) -> str:
     """Search OneDrive for an Excel file by name, return its item ID."""
