@@ -741,6 +741,14 @@ body{background:#16181d;color:#d4d8e8;font-family:-apple-system,BlinkMacSystemFo
     <div id="gr-list"></div>
   </div>
 
+  <!-- Quick page links -->
+  <div style="border-top:1px solid #252836;padding:5px 0;flex-shrink:0">
+    <div style="font-size:9px;color:#6b7394;font-weight:700;letter-spacing:.06em;padding:5px 12px 3px">⚡ DASHBOARDS</div>
+    <a href="/actions-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">✅</span> Action Items Board</a>
+    <a href="/triggers-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">⚡</span> Automation Rules</a>
+    <a href="/memory-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">🧠</span> Memory Viewer</a>
+  </div>
+
   <!-- Connections & bottom links -->
   <div id="nav-bottom">
     <div id="conn-strip"></div>
@@ -1876,6 +1884,758 @@ def triggers_delete(rule_id):
     try:
         from tools.trigger_engine import delete_rule
         return jsonify(delete_rule(rule_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/triggers/toggle/<int:rule_id>", methods=["POST"])
+def triggers_toggle(rule_id):
+    try:
+        from tools.trigger_engine import toggle_rule
+        data = request.get_json(force=True) or {}
+        enabled = bool(data.get("enabled", True))
+        return jsonify(toggle_rule(rule_id, enabled))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/actions/add", methods=["POST"])
+def actions_add():
+    try:
+        from tools.action_items import save_action_items
+        data = request.get_json(force=True) or {}
+        task = data.get("task", "").strip()
+        if not task:
+            return jsonify({"error": "task is required"}), 400
+        count = save_action_items([{
+            "task":     task,
+            "owner":    data.get("owner", "me"),
+            "due_date": data.get("due_date", ""),
+            "source":   "manual",
+            "priority": data.get("priority", "medium"),
+        }])
+        return jsonify({"saved": count})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD PAGES  — full standalone HTML pages linked from the nav sidebar
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PAGE_STYLE = """
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#16181d;color:#d4d8e8;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;font-size:13px;min-height:100vh}
+a{color:#64ffda;text-decoration:none}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#252836;border-radius:3px}
+.page-wrap{max-width:960px;margin:0 auto;padding:28px 24px}
+.page-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+.page-title{font-size:20px;font-weight:700;color:#d4d8e8;display:flex;align-items:center;gap:10px}
+.page-subtitle{font-size:12px;color:#6b7394;margin-top:3px}
+.back-link{font-size:11px;color:#6b7394;padding:5px 10px;border:1px solid #252836;border-radius:5px;cursor:pointer;background:none;transition:all .15s}
+.back-link:hover{color:#d4d8e8;border-color:#3a4a70}
+.stats-bar{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.stat-card{background:#1e2028;border:1px solid #252836;border-radius:7px;padding:10px 16px;flex:1;min-width:100px}
+.stat-num{font-size:22px;font-weight:700;color:#64ffda}
+.stat-lbl{font-size:10px;color:#6b7394;margin-top:2px}
+.filter-bar{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
+.flt-btn{background:#1e2028;border:1px solid #252836;color:#8892b0;border-radius:5px;padding:5px 13px;font-size:11px;cursor:pointer;transition:all .15s;font-family:inherit}
+.flt-btn:hover{border-color:#3a4a70;color:#d4d8e8}
+.flt-btn.active{background:#1c2540;border-color:#2a4070;color:#64ffda}
+.btn{border:none;border-radius:5px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;font-family:inherit}
+.btn-primary{background:#e94560;color:#fff}
+.btn-primary:hover{background:#c73652}
+.btn-success{background:#1a3a1a;color:#50fa7b;border:1px solid #2a5a2a}
+.btn-success:hover{background:#22472f}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-danger{background:#2a1010;color:#ff6e6e;border:1px solid #4a2020}
+.btn-danger:hover{background:#3a1a1a}
+.badge{display:inline-block;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700}
+.badge-high{background:#2a1010;color:#ff5555}
+.badge-medium{background:#2a2010;color:#ffb86c}
+.badge-low{background:#0d2a1a;color:#50fa7b}
+.badge-open{background:#1c2540;color:#8be9fd}
+.badge-done{background:#1a1c24;color:#6b7394}
+.card{background:#1e2028;border:1px solid #252836;border-radius:8px;padding:14px 16px;margin-bottom:10px;transition:border-color .15s}
+.card:hover{border-color:#2a3a50}
+.card-row{display:flex;align-items:flex-start;gap:12px}
+.card-check{margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:#64ffda;flex-shrink:0}
+.card-body{flex:1;min-width:0}
+.card-task{font-size:13px;color:#d4d8e8;line-height:1.5;margin-bottom:6px}
+.card-task.done{text-decoration:line-through;color:#6b7394}
+.card-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card-meta-item{font-size:10px;color:#6b7394}
+.card-actions{display:flex;gap:6px;align-items:center;flex-shrink:0}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:500;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal-box{background:#1a1c24;border:1px solid #2a2d3e;border-radius:10px;width:440px;max-width:96vw;padding:22px 24px;box-shadow:0 24px 64px rgba(0,0,0,.6)}
+.modal-title{font-size:14px;font-weight:700;color:#d4d8e8;margin-bottom:16px}
+.form-group{margin-bottom:13px}
+.form-label{font-size:11px;color:#8892b0;margin-bottom:5px;display:block}
+.form-input,.form-select,.form-textarea{width:100%;background:#12141a;border:1px solid #2a2d3e;border-radius:5px;color:#d4d8e8;font-size:12.5px;padding:8px 10px;outline:none;transition:border-color .15s;font-family:inherit}
+.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:#64ffda}
+.form-select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7394'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+.form-textarea{resize:vertical;min-height:70px}
+.form-row{display:flex;gap:10px}
+.form-row .form-group{flex:1}
+.modal-ftr{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.empty-state{text-align:center;padding:48px 24px;color:#6b7394}
+.empty-state-icon{font-size:40px;margin-bottom:12px}
+.empty-state-txt{font-size:13px}
+table{width:100%;border-collapse:collapse}
+th{font-size:10px;color:#6b7394;font-weight:700;letter-spacing:.07em;padding:8px 10px;text-align:left;border-bottom:1px solid #252836;white-space:nowrap}
+td{padding:10px;font-size:12px;color:#d4d8e8;border-bottom:1px solid #1e2028;vertical-align:top}
+tr:hover td{background:#1e2028}
+.table-wrap{background:#1a1c24;border:1px solid #252836;border-radius:8px;overflow:hidden}
+.section-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;margin-top:24px}
+.section-title{font-size:12px;font-weight:700;color:#8892b0;letter-spacing:.06em}
+.log-row{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #1e2028;font-size:11px;align-items:center}
+.log-row:last-child{border-bottom:none}
+.log-ts{color:#6b7394;min-width:130px;flex-shrink:0}
+.log-name{color:#d4d8e8;flex:1}
+.log-type{color:#8892b0;min-width:80px}
+.log-result{color:#50fa7b}
+.toggle-sw{position:relative;display:inline-block;width:32px;height:18px}
+.toggle-sw input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:#2a2020;border-radius:18px;transition:.3s}
+.toggle-slider:before{position:absolute;content:'';height:12px;width:12px;left:3px;bottom:3px;background:#6b7394;border-radius:50%;transition:.3s}
+input:checked+.toggle-slider{background:#1a3a1a}
+input:checked+.toggle-slider:before{transform:translateX(14px);background:#50fa7b}
+.mem-section{margin-bottom:22px}
+.mem-section-hdr{font-size:10px;font-weight:700;color:#6b7394;letter-spacing:.08em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid #252836}
+.mem-row{display:flex;align-items:flex-start;gap:10px;padding:7px 10px;border-radius:5px;transition:background .12s}
+.mem-row:hover{background:#1e2028}
+.mem-key{font-size:11px;color:#8892b0;min-width:150px;flex-shrink:0;margin-top:1px}
+.mem-val{flex:1;font-size:12px;color:#d4d8e8;word-break:break-word}
+.mem-del{background:none;border:none;color:#3a3a4a;font-size:13px;cursor:pointer;flex-shrink:0;transition:color .15s;line-height:1;padding:1px}
+.mem-del:hover{color:#ff6e6e}
+.updated-at{font-size:10px;color:#3a4060;margin-top:20px;text-align:right}
+</style>
+"""
+
+_PAGE_NAV = """
+<div style="background:#1a1c24;border-bottom:1px solid #252836;padding:10px 24px;display:flex;align-items:center;gap:16px">
+  <a href="/" style="font-size:13px;font-weight:700;color:#64ffda;text-decoration:none">⚡ Work Assistant</a>
+  <span style="color:#252836">|</span>
+  <a href="/actions-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">✅ Action Items</a>
+  <a href="/triggers-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">⚡ Automation</a>
+  <a href="/memory-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">🧠 Memory</a>
+</div>
+"""
+
+
+@app.route("/actions-page")
+def actions_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Action Items — Work Assistant</title>
+{_PAGE_STYLE}
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">✅ Action Items Board</div>
+      <div class="page-subtitle">Your open tasks, extracted from emails, meetings and chats</div>
+    </div>
+    <button class="btn btn-primary" onclick="openAddModal()">＋ Add Task</button>
+  </div>
+
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="stat-open">—</div><div class="stat-lbl">Open</div></div>
+    <div class="stat-card"><div class="stat-num" id="stat-high" style="color:#ff5555">—</div><div class="stat-lbl">High Priority</div></div>
+    <div class="stat-card"><div class="stat-num" id="stat-due" style="color:#ffb86c">—</div><div class="stat-lbl">Due Today</div></div>
+    <div class="stat-card"><div class="stat-num" id="stat-done" style="color:#50fa7b">—</div><div class="stat-lbl">Completed</div></div>
+  </div>
+
+  <div class="filter-bar">
+    <button class="flt-btn active" data-filter="open" onclick="setFilter('open',this)">Open</button>
+    <button class="flt-btn" data-filter="high" onclick="setFilter('high',this)">🔴 High Priority</button>
+    <button class="flt-btn" data-filter="medium" onclick="setFilter('medium',this)">🟡 Medium</button>
+    <button class="flt-btn" data-filter="low" onclick="setFilter('low',this)">🟢 Low</button>
+    <button class="flt-btn" data-filter="due" onclick="setFilter('due',this)">📅 Due Today</button>
+    <button class="flt-btn" data-filter="completed" onclick="setFilter('completed',this)">✅ Completed</button>
+    <button class="flt-btn" data-filter="all" onclick="setFilter('all',this)">All</button>
+  </div>
+
+  <div id="items-list"><div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-txt">Loading…</div></div></div>
+</div>
+
+<!-- Add Task Modal -->
+<div class="modal-overlay" id="add-modal" onclick="if(event.target===this)closeAddModal()">
+  <div class="modal-box">
+    <div class="modal-title">＋ Add Task</div>
+    <div class="form-group">
+      <label class="form-label">Task description *</label>
+      <input class="form-input" id="add-task" placeholder="What needs to be done?" autofocus>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Priority</label>
+        <select class="form-select" id="add-priority">
+          <option value="high">🔴 High</option>
+          <option value="medium" selected>🟡 Medium</option>
+          <option value="low">🟢 Low</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Due date</label>
+        <input class="form-input" id="add-due" type="date">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Owner</label>
+      <input class="form-input" id="add-owner" placeholder="me" value="me">
+    </div>
+    <div class="modal-ftr">
+      <button class="btn" style="background:#252836;color:#8892b0" onclick="closeAddModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAdd()">Add Task</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _filter = 'open';
+let _today = new Date().toISOString().slice(0,10);
+
+function setFilter(f, btn) {{
+  _filter = f;
+  document.querySelectorAll('.flt-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderItems(_allItems);
+}}
+
+let _allItems = [];
+
+async function loadItems() {{
+  try {{
+    const [openR, doneR] = await Promise.all([
+      fetch('/action-items?status=open').then(r=>r.json()),
+      fetch('/action-items?status=completed').then(r=>r.json()),
+    ]);
+    const open = openR.items || [];
+    const done = doneR.items || [];
+    _allItems = [...open, ...done];
+    updateStats(open, done);
+    renderItems(_allItems);
+  }} catch(e) {{
+    document.getElementById('items-list').innerHTML =
+      '<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-txt">Could not load tasks — make sure the agent is running.</div></div>';
+  }}
+}}
+
+function updateStats(open, done) {{
+  const today = _today;
+  document.getElementById('stat-open').textContent = open.length;
+  document.getElementById('stat-high').textContent = open.filter(i=>i.priority==='high').length;
+  document.getElementById('stat-due').textContent = open.filter(i=>i.due_date && i.due_date<=today).length;
+  document.getElementById('stat-done').textContent = done.length;
+}}
+
+function renderItems(items) {{
+  let filtered = items;
+  const today = _today;
+  if (_filter === 'open') filtered = items.filter(i=>i.status==='open');
+  else if (_filter === 'completed') filtered = items.filter(i=>i.status==='completed');
+  else if (_filter === 'high') filtered = items.filter(i=>i.status==='open' && i.priority==='high');
+  else if (_filter === 'medium') filtered = items.filter(i=>i.status==='open' && i.priority==='medium');
+  else if (_filter === 'low') filtered = items.filter(i=>i.status==='open' && i.priority==='low');
+  else if (_filter === 'due') filtered = items.filter(i=>i.status==='open' && i.due_date && i.due_date<=today);
+
+  const el = document.getElementById('items-list');
+  if (!filtered.length) {{
+    el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🎉</div><div class="empty-state-txt">Nothing here! All clear.</div></div>';
+    return;
+  }}
+  el.innerHTML = filtered.map(item => {{
+    const done = item.status === 'completed';
+    const pri = item.priority || 'medium';
+    const priLabel = {{high:'🔴 High',medium:'🟡 Medium',low:'🟢 Low'}}[pri] || pri;
+    const priBadge = `<span class="badge badge-${{pri}}">${{priLabel}}</span>`;
+    const due = item.due_date ? `<span class="card-meta-item">📅 ${{item.due_date}}</span>` : '';
+    const owner = item.owner && item.owner !== 'me' ? `<span class="card-meta-item">👤 ${{item.owner}}</span>` : '';
+    const src = item.source ? `<span class="card-meta-item">📌 ${{item.source}}</span>` : '';
+    const ts = item.extracted_at ? `<span class="card-meta-item">${{item.extracted_at.slice(0,10)}}</span>` : '';
+    const checkAttr = done ? 'checked disabled' : `onchange="completeItem(${{item.id}},this)"`;
+    return `<div class="card" id="card-${{item.id}}">
+      <div class="card-row">
+        <input type="checkbox" class="card-check" ${{checkAttr}}>
+        <div class="card-body">
+          <div class="card-task${{done?' done':''}}">${{_esc(item.task)}}</div>
+          <div class="card-meta">${{priBadge}}${{due}}${{owner}}${{src}}${{ts}}</div>
+        </div>
+        <div class="card-actions">
+          ${{!done ? `<button class="btn btn-danger btn-sm" onclick="deleteItem(${{item.id}})">✕</button>` : ''}}
+        </div>
+      </div>
+    </div>`;
+  }}).join('');
+}}
+
+async function completeItem(id, cb) {{
+  cb.disabled = true;
+  await fetch('/action-items/complete', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{id}})}});
+  await loadItems();
+}}
+
+async function deleteItem(id) {{
+  if (!confirm('Delete this task?')) return;
+  await fetch('/action-items/delete', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{id}})}});
+  document.getElementById('card-'+id)?.remove();
+  _allItems = _allItems.filter(i=>i.id!==id);
+  updateStats(_allItems.filter(i=>i.status==='open'), _allItems.filter(i=>i.status==='completed'));
+}}
+
+function openAddModal() {{
+  document.getElementById('add-modal').classList.add('open');
+  document.getElementById('add-task').focus();
+}}
+function closeAddModal() {{
+  document.getElementById('add-modal').classList.remove('open');
+  document.getElementById('add-task').value='';
+  document.getElementById('add-due').value='';
+  document.getElementById('add-owner').value='me';
+}}
+
+async function submitAdd() {{
+  const task = document.getElementById('add-task').value.trim();
+  if (!task) {{ document.getElementById('add-task').focus(); return; }}
+  await fetch('/actions/add', {{
+    method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{
+      task, priority: document.getElementById('add-priority').value,
+      due_date: document.getElementById('add-due').value,
+      owner: document.getElementById('add-owner').value || 'me',
+    }})
+  }});
+  closeAddModal();
+  loadItems();
+}}
+
+function _esc(s) {{
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}}
+
+// Add task on Enter in the task input
+document.addEventListener('DOMContentLoaded', ()=>{{
+  document.getElementById('add-task').addEventListener('keydown', e=>{{ if(e.key==='Enter') submitAdd(); }});
+  loadItems();
+  setInterval(loadItems, 30000);
+}});
+</script>
+</body></html>"""
+    return html
+
+
+@app.route("/action-items")
+def action_items_api():
+    try:
+        from tools.action_items import get_my_action_items
+        status   = request.args.get("status", "open")
+        priority = request.args.get("priority") or None
+        items    = get_my_action_items(status=status, priority=priority)
+        return jsonify({"items": items})
+    except Exception as e:
+        return jsonify({"items": [], "error": str(e)})
+
+
+@app.route("/action-items/complete", methods=["POST"])
+def action_items_complete():
+    try:
+        from tools.action_items import complete_action_item
+        item_id = (request.get_json(force=True) or {}).get("id")
+        return jsonify(complete_action_item(item_id=item_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/action-items/delete", methods=["POST"])
+def action_items_delete():
+    try:
+        from tools.action_items import delete_action_item
+        item_id = (request.get_json(force=True) or {}).get("id")
+        return jsonify(delete_action_item(item_id=item_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/triggers-page")
+def triggers_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Automation Rules — Work Assistant</title>
+{_PAGE_STYLE}
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">⚡ Automation Rules</div>
+      <div class="page-subtitle">If-this-then-that rules triggered by GitHub, Jira, and other webhooks</div>
+    </div>
+    <button class="btn btn-primary" onclick="openAddModal()">＋ Add Rule</button>
+  </div>
+
+  <div class="table-wrap" id="rules-wrap">
+    <table>
+      <thead><tr>
+        <th>Name</th><th>Source</th><th>Event</th><th>Condition</th><th>Action</th><th>Fires</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody id="rules-body"><tr><td colspan="8" style="text-align:center;color:#6b7394;padding:24px">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="section-hdr" style="margin-top:28px">
+    <span class="section-title">🔥 RECENT FIRE LOG</span>
+    <button class="btn btn-sm" style="background:#252836;color:#8892b0;border:1px solid #252836" onclick="loadData()">↻ Refresh</button>
+  </div>
+  <div class="table-wrap">
+    <div id="log-body" style="padding:0 10px"></div>
+  </div>
+</div>
+
+<!-- Add Rule Modal -->
+<div class="modal-overlay" id="add-modal" onclick="if(event.target===this)closeAddModal()">
+  <div class="modal-box" style="width:520px">
+    <div class="modal-title">⚡ Add Automation Rule</div>
+    <div class="form-group">
+      <label class="form-label">Rule name *</label>
+      <input class="form-input" id="r-name" placeholder="e.g. Notify on PR opened">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Source</label>
+        <select class="form-select" id="r-source">
+          <option value="any">Any</option>
+          <option value="github">GitHub</option>
+          <option value="jira">Jira</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Event type</label>
+        <select class="form-select" id="r-event">
+          <option value="any">Any</option>
+          <option value="pull_request">pull_request</option>
+          <option value="push">push</option>
+          <option value="issues">issues</option>
+          <option value="issue_comment">issue_comment</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Condition (JSON key:value pairs to match in payload)</label>
+      <input class="form-input" id="r-condition" placeholder='{{"action": "opened"}}'>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Action *</label>
+        <select class="form-select" id="r-action">
+          <option value="notify">notify</option>
+          <option value="slack_message">slack_message</option>
+          <option value="create_jira">create_jira</option>
+          <option value="create_linear">create_linear</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Action args (JSON)</label>
+      <input class="form-input" id="r-action-args" placeholder='{{"channel": "#dev", "message": "New PR!"}}'>
+    </div>
+    <div id="add-error" style="color:#ff6e6e;font-size:11px;margin-top:6px;display:none"></div>
+    <div class="modal-ftr">
+      <button class="btn" style="background:#252836;color:#8892b0" onclick="closeAddModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAdd()">Add Rule</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _rules = [];
+
+async function loadData() {{
+  try {{
+    const data = await fetch('/triggers').then(r=>r.json());
+    _rules = data.rules || [];
+    renderRules(_rules);
+    renderLog(data.log || []);
+  }} catch(e) {{
+    document.getElementById('rules-body').innerHTML =
+      '<tr><td colspan="8" style="color:#ff6e6e;padding:16px;text-align:center">Could not load — make sure the agent is running</td></tr>';
+  }}
+}}
+
+function renderRules(rules) {{
+  const tb = document.getElementById('rules-body');
+  if (!rules.length) {{
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#6b7394;padding:24px">No rules yet. Click ＋ Add Rule to create one.</td></tr>';
+    return;
+  }}
+  tb.innerHTML = rules.map(r => {{
+    const cond = Object.keys(r.condition||{{}}).length
+      ? Object.entries(r.condition).map(([k,v])=>`${{k}}=${{v}}`).join(', ')
+      : '<em style="color:#6b7394">any</em>';
+    const args = Object.keys(r.action_args||{{}}).length
+      ? '<code style="font-size:10px;color:#8892b0">'+JSON.stringify(r.action_args)+'</code>'
+      : '<em style="color:#6b7394">—</em>';
+    return `<tr id="rule-${{r.id}}">
+      <td style="font-weight:600">${{_esc(r.name)}}</td>
+      <td><span class="badge badge-open">${{r.source}}</span></td>
+      <td style="color:#8892b0">${{r.event_type}}</td>
+      <td style="font-size:11px">${{cond}}</td>
+      <td><span class="badge badge-medium">${{r.action}}</span><br><span style="font-size:10px;color:#6b7394">${{args}}</span></td>
+      <td style="color:#64ffda;font-weight:700">${{r.fire_count||0}}</td>
+      <td>
+        <label class="toggle-sw">
+          <input type="checkbox" ${{r.enabled?'checked':''}} onchange="toggleRule(${{r.id}},this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteRule(${{r.id}})">Delete</button></td>
+    </tr>`;
+  }}).join('');
+}}
+
+function renderLog(log) {{
+  const el = document.getElementById('log-body');
+  if (!log.length) {{
+    el.innerHTML = '<div style="padding:16px;color:#6b7394;text-align:center;font-size:12px">No events fired yet.</div>';
+    return;
+  }}
+  el.innerHTML = log.map(l=>`
+    <div class="log-row">
+      <span class="log-ts">${{l.fired_at ? l.fired_at.slice(0,19).replace('T',' ') : '—'}}</span>
+      <span class="log-name">${{_esc(l.rule_name)}}</span>
+      <span class="log-type">${{l.event_type}}</span>
+      <span class="log-result">✓ ${{l.result}}</span>
+    </div>`).join('');
+}}
+
+async function toggleRule(id, enabled) {{
+  await fetch('/triggers/toggle/'+id, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{enabled}})}});
+}}
+
+async function deleteRule(id) {{
+  if (!confirm('Delete this rule?')) return;
+  await fetch('/triggers/'+id, {{method:'DELETE'}});
+  _rules = _rules.filter(r=>r.id!==id);
+  renderRules(_rules);
+}}
+
+function openAddModal() {{
+  document.getElementById('add-error').style.display='none';
+  document.getElementById('add-modal').classList.add('open');
+  document.getElementById('r-name').focus();
+}}
+function closeAddModal() {{
+  document.getElementById('add-modal').classList.remove('open');
+  ['r-name','r-condition','r-action-args'].forEach(id=>document.getElementById(id).value='');
+}}
+
+async function submitAdd() {{
+  const name = document.getElementById('r-name').value.trim();
+  const errEl = document.getElementById('add-error');
+  if (!name) {{ errEl.textContent='Rule name is required'; errEl.style.display='block'; return; }}
+
+  let condition = {{}}, action_args = {{}};
+  try {{ const raw=document.getElementById('r-condition').value.trim(); if(raw) condition=JSON.parse(raw); }} catch(e) {{ errEl.textContent='Condition must be valid JSON'; errEl.style.display='block'; return; }}
+  try {{ const raw=document.getElementById('r-action-args').value.trim(); if(raw) action_args=JSON.parse(raw); }} catch(e) {{ errEl.textContent='Action args must be valid JSON'; errEl.style.display='block'; return; }}
+
+  errEl.style.display='none';
+  const res = await fetch('/triggers', {{
+    method:'POST', headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{name, source:document.getElementById('r-source').value, event_type:document.getElementById('r-event').value, condition, action:document.getElementById('r-action').value, action_args}})
+  }});
+  const data = await res.json();
+  if (data.error) {{ errEl.textContent=data.error; errEl.style.display='block'; return; }}
+  closeAddModal();
+  loadData();
+}}
+
+function _esc(s) {{ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+
+document.addEventListener('DOMContentLoaded', ()=>{{ loadData(); setInterval(loadData, 15000); }});
+</script>
+</body></html>"""
+    return html
+
+
+@app.route("/memory-page")
+def memory_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Memory Viewer — Work Assistant</title>
+{_PAGE_STYLE}
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">🧠 Memory Viewer</div>
+      <div class="page-subtitle">Everything the agent has learned and remembered about you</div>
+    </div>
+    <button class="btn btn-primary" onclick="openAddModal()">＋ Add Fact</button>
+  </div>
+
+  <div id="mem-content"><div class="empty-state"><div class="empty-state-icon">🧠</div><div class="empty-state-txt">Loading…</div></div></div>
+</div>
+
+<!-- Add Fact Modal -->
+<div class="modal-overlay" id="add-modal" onclick="if(event.target===this)closeAddModal()">
+  <div class="modal-box">
+    <div class="modal-title">＋ Add Fact</div>
+    <div class="form-group">
+      <label class="form-label">Category</label>
+      <select class="form-select" id="f-category">
+        <option value="preferences">preferences</option>
+        <option value="context">context</option>
+        <option value="people">people</option>
+        <option value="patterns">patterns</option>
+        <option value="facts" selected>facts</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Key *</label>
+        <input class="form-input" id="f-key" placeholder="e.g. timezone">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Value *</label>
+        <input class="form-input" id="f-value" placeholder="e.g. GMT+5:30">
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn" style="background:#252836;color:#8892b0" onclick="closeAddModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAdd()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const SECTION_META = {{
+  preferences: {{ icon:'⚙️', label:'Preferences', desc:'Response style, timezone, language' }},
+  context:     {{ icon:'📌', label:'Work Context', desc:'Sprint, projects, team, company' }},
+  people:      {{ icon:'👥', label:'People',       desc:'Colleagues auto-extracted from conversations' }},
+  patterns:    {{ icon:'📈', label:'Work Patterns', desc:'Observed habits and routines' }},
+  facts:       {{ icon:'💡', label:'Other Facts',   desc:'Free-form facts the agent has learned' }},
+}};
+
+async function loadMemory() {{
+  try {{
+    const data = await fetch('/memory').then(r=>r.json());
+    renderMemory(data);
+  }} catch(e) {{
+    document.getElementById('mem-content').innerHTML =
+      '<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-txt">Could not load — make sure the agent is running.</div></div>';
+  }}
+}}
+
+function renderMemory(data) {{
+  const mem = data.memory || {{}};
+  const updatedAt = data.updated_at || '';
+  const el = document.getElementById('mem-content');
+
+  let totalFacts = 0;
+  let html = '';
+
+  for (const [cat, meta] of Object.entries(SECTION_META)) {{
+    const entries = mem[cat] || {{}};
+    const count = Object.keys(entries).length;
+    totalFacts += count;
+    html += `<div class="mem-section">
+      <div class="mem-section-hdr">${{meta.icon}} ${{meta.label.toUpperCase()}} <span style="color:#3a4060;font-weight:400;letter-spacing:0;font-size:9px;margin-left:6px">${{meta.desc}}</span></div>`;
+
+    if (!count) {{
+      html += `<div style="padding:8px 10px;color:#3a4060;font-size:11px;font-style:italic">Nothing recorded yet.</div>`;
+    }} else {{
+      for (const [key, val] of Object.entries(entries)) {{
+        const display = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        html += `<div class="mem-row">
+          <span class="mem-key">${{_esc(key)}}</span>
+          <span class="mem-val">${{_esc(display)}}</span>
+          <button class="mem-del" title="Delete" onclick="deleteFact('${{_esc(cat)}}','${{_esc(key)}}')">✕</button>
+        </div>`;
+      }}
+    }}
+    html += `</div>`;
+  }}
+
+  if (!totalFacts) {{
+    html = '<div class="empty-state"><div class="empty-state-icon">🌱</div><div class="empty-state-txt">No memories yet — start chatting with the agent and it will learn about you automatically.</div></div>';
+  }}
+
+  if (updatedAt) html += `<div class="updated-at">Last updated: ${{updatedAt.slice(0,19).replace('T',' ')}}</div>`;
+  el.innerHTML = html;
+}}
+
+async function deleteFact(category, key) {{
+  if (!confirm(`Delete "${{key}}" from ${{category}}?`)) return;
+  await fetch('/memory/delete', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{category,key}})}});
+  loadMemory();
+}}
+
+function openAddModal() {{
+  document.getElementById('add-modal').classList.add('open');
+  document.getElementById('f-key').focus();
+}}
+function closeAddModal() {{
+  document.getElementById('add-modal').classList.remove('open');
+  document.getElementById('f-key').value='';
+  document.getElementById('f-value').value='';
+}}
+
+async function submitAdd() {{
+  const category = document.getElementById('f-category').value;
+  const key = document.getElementById('f-key').value.trim();
+  const value = document.getElementById('f-value').value.trim();
+  if (!key || !value) return;
+  await fetch('/memory/add', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{category,key,value}})}});
+  closeAddModal();
+  loadMemory();
+}}
+
+function _esc(s) {{ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+
+document.addEventListener('DOMContentLoaded', ()=>{{ loadMemory(); }});
+</script>
+</body></html>"""
+    return html
+
+
+@app.route("/memory")
+def memory_get():
+    try:
+        from tools.memory import get_memory_summary
+        return jsonify(get_memory_summary())
+    except Exception as e:
+        return jsonify({"memory": {}, "total_facts": 0, "error": str(e)})
+
+
+@app.route("/memory/add", methods=["POST"])
+def memory_add():
+    try:
+        from tools.memory import save_fact
+        data = request.get_json(force=True) or {}
+        save_fact(data["category"], data["key"], data["value"])
+        return jsonify({"status": "saved"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/memory/delete", methods=["POST"])
+def memory_delete():
+    try:
+        from tools.memory import delete_fact
+        data = request.get_json(force=True) or {}
+        delete_fact(data["category"], data["key"])
+        return jsonify({"status": "deleted"})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
