@@ -9,12 +9,14 @@ def test_correction_detection():
     assert detect_correction("show me my emails") is None
 
 def test_save_and_load_corrections(tmp_path):
-    with patch("tools.corrections.CORRECTIONS_FILE", tmp_path / "corrections.json"):
-        from tools.corrections import save_correction, get_corrections_context
-        save_correction(
+    import tools.corrections as mod
+    from unittest.mock import patch
+    with patch.object(mod, "CORRECTIONS_FILE", tmp_path / "corrections.json"):
+        mod.save_correction(
             bad_response="Java is the language",
             correction="Python not Java",
             user_message="what language do we use"
         )
-        ctx = get_corrections_context()
+        ctx = mod.get_corrections_context()
         assert "Python not Java" in ctx
+        assert "Past corrections" in ctx

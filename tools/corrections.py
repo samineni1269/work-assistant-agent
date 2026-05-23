@@ -16,13 +16,14 @@ from pathlib import Path
 from typing import Optional
 
 CORRECTIONS_FILE = Path(__file__).parent.parent / "corrections.json"
-MAX_CORRECTIONS  = 100   # cap to avoid bloating the prompt
+MAX_CORRECTIONS       = 100   # cap to avoid bloating the prompt
+MAX_PROMPT_CORRECTIONS = 20   # max corrections to inject into system prompt
 
 _TRIGGERS = [
     r"\bthat'?s wrong\b",
-    r"\bno,?\s+(?:actually|the answer is|it'?s|I meant)\b",
+    r"\bno[,!]\s+(?:actually|the answer is|it'?s|I meant)\b",
     r"\bI meant\b",
-    r"\bactually[,\s]",
+    r"\bactually\b",
     r"\bincorrect\b",
     r"\bnot\s+\w+[,\s]+(?:it'?s|use|try)\b",
 ]
@@ -56,7 +57,9 @@ def _load() -> list:
 
 
 def _save(data: list):
-    CORRECTIONS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp = CORRECTIONS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp.replace(CORRECTIONS_FILE)
 
 
 def save_correction(bad_response: str, correction: str, user_message: str = ""):
@@ -85,7 +88,7 @@ def get_corrections_context() -> str:
     if not data:
         return ""
     lines = ["## Past corrections — always follow these rules:"]
-    for entry in data[:20]:
+    for entry in data[:MAX_PROMPT_CORRECTIONS]:
         lines.append(f"- Previously said: \"{entry['bad'][:80]}\"")
         lines.append(f"  Correct: \"{entry['correction']}\"")
     return "\n".join(lines)
