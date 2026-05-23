@@ -191,6 +191,12 @@ def _with_retry(fn, tool_name: str, max_attempts: int = 3) -> str:
             if attempt < max_attempts - 1:
                 time.sleep(delay)
                 delay *= 2   # exponential backoff: 1s, 2s
+            # Record error for avoidance learning (Feature 12)
+            try:
+                from tools.self_learning import record_tool_error
+                record_tool_error(tool_name, type(e).__name__)
+            except Exception:
+                pass
     tool_label = tool_name.replace("_", " ")
     return json.dumps({
         "error": f"⚠️ {tool_label} is temporarily unavailable.",
@@ -339,6 +345,10 @@ def dispatch_tool(name: str, args: dict) -> str:
         "get_memory_summary":    lambda: _mem().get_memory_summary(),
         # Analytics
         "get_analytics_summary": lambda: _analytics().get_analytics_summary(**args),
+        # Meeting prep
+        "get_meeting_brief":   lambda: __import__("tools.meeting_prep", fromlist=["get_next_meeting_brief"]).get_next_meeting_brief(),
+        # Self-learning state
+        "get_self_learning_state": lambda: __import__("tools.self_learning", fromlist=["get_full_state"]).get_full_state(),
     }
 
     if name not in dispatch:
@@ -699,6 +709,24 @@ in PARALLEL → call score_notifications() on the combined results → present r
     if tone_guide:
         base += f"\n\n## Your Communication Style\n{tone_guide}"
 
+    # ── Inject past corrections (Feature 1) ──────────────────────────────────
+    try:
+        from tools.corrections import get_corrections_context
+        corrections_ctx = get_corrections_context()
+        if corrections_ctx:
+            base += f"\n\n{corrections_ctx}"
+    except Exception:
+        pass
+
+    # ── Inject semantic profile (Feature 11) ─────────────────────────────────
+    try:
+        from tools.self_learning import get_semantic_profile
+        profile = get_semantic_profile()
+        if profile:
+            base += f"\n\n{profile}"
+    except Exception:
+        pass
+
     return base
 
 
@@ -848,6 +876,24 @@ def run_agent_turn(conversation_history: list, user_message: str,
         console.print("[dim]Set at least one of: GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY in your .env[/dim]\n")
         sys.exit(1)
 
+    # ── Correction Memory (Feature 1): detect and store user corrections ──────
+    try:
+        from tools.corrections import detect_correction, save_correction
+        correction = detect_correction(user_message)
+        if correction and len(conversation_history) >= 2:
+            last_response = next(
+                (m["content"] for m in reversed(conversation_history)
+                 if m.get("role") == "assistant" and m.get("content")),
+                ""
+            )
+            save_correction(
+                bad_response=last_response or "",
+                correction=correction[0],
+                user_message=user_message,
+            )
+    except Exception:
+        pass
+
     # Add user message to neutral history
     conversation_history.append({"role": "user", "content": user_message})
 
@@ -898,6 +944,41 @@ def run_agent_turn(conversation_history: list, user_message: str,
             # ── Post-turn: learn from this exchange ───────────────────────────
             try:
                 extract_and_save_facts(user_message, text)
+            except Exception:
+                pass
+
+            # Preference extraction every 5 turns (Feature 3)
+            try:
+                from tools.memory import preference_extraction
+                preference_extraction(conversation_history)
+            except Exception:
+                pass
+
+            # Query clustering (Feature 10)
+            try:
+                from tools.self_learning import record_query
+                record_query(user_message)
+            except Exception:
+                pass
+
+            # Semantic profile update every 10 turns (Feature 11)
+            try:
+                if len(conversation_history) % 10 == 0:
+                    from tools.self_learning import update_semantic_profile
+                    snippet = "\n".join(
+                        f"{m['role']}: {m.get('content','')[:200]}"
+                        for m in conversation_history[-10:]
+                        if m.get("content")
+                    )
+                    update_semantic_profile(snippet)
+            except Exception:
+                pass
+
+            # Tool usage recording (Feature 5)
+            try:
+                from tools.self_learning import record_tool_usage, _classify_query
+                if _tools_called:
+                    record_tool_usage(_classify_query(user_message), _tools_called)
             except Exception:
                 pass
 
