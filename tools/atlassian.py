@@ -75,6 +75,29 @@ def _confluence(method: str, path: str, **kwargs) -> dict:
 # JIRA — Issues
 # ─────────────────────────────────────────────
 
+def _jira_search(jql: str, fields: str, max_results: int) -> dict:
+    """
+    Run a JQL search using the new /search/jql POST endpoint (required since 2025).
+    Falls back to GET /search for older instances.
+    """
+    payload = {
+        "jql": jql,
+        "maxResults": min(max_results, 50),
+        "fields": [f.strip() for f in fields.split(",")],
+    }
+    try:
+        return _jira("POST", "/search/jql", json=payload)
+    except RuntimeError as e:
+        # Fallback: old GET endpoint (on-premise Jira may still support it)
+        if "410" in str(e) or "404" in str(e):
+            return _jira(
+                "GET",
+                f"/search?jql={requests.utils.quote(jql)}&maxResults={min(max_results, 50)}"
+                f"&fields={fields}",
+            )
+        raise
+
+
 def get_my_jira_issues(max_results: int = 20, status: str = None) -> list[dict]:
     """
     Get Jira issues assigned to the current user.
@@ -88,14 +111,13 @@ def get_my_jira_issues(max_results: int = 20, status: str = None) -> list[dict]:
     """
     jql = "assignee = currentUser()"
     if status:
-        jql += f" AND status = \"{status}\""
+        # Normalise common aliases
+        status_map = {"open": "To Do", "todo": "To Do", "done": "Done", "closed": "Done"}
+        mapped = status_map.get(status.lower(), status)
+        jql += f" AND status = \"{mapped}\""
     jql += " ORDER BY updated DESC"
 
-    data = _jira(
-        "GET",
-        f"/search?jql={requests.utils.quote(jql)}&maxResults={min(max_results, 50)}"
-        f"&fields=summary,status,priority,duedate,updated,assignee,reporter",
-    )
+    data = _jira_search(jql, "summary,status,priority,duedate,updated,assignee,reporter", max_results)
     issues = []
     for issue in data.get("issues", []):
         fields = issue.get("fields", {})
@@ -121,11 +143,7 @@ def search_jira(jql: str, max_results: int = 20) -> list[dict]:
     Returns:
         List of issue dicts: key, summary, status, assignee, priority, updated
     """
-    data = _jira(
-        "GET",
-        f"/search?jql={requests.utils.quote(jql)}&maxResults={min(max_results, 50)}"
-        f"&fields=summary,status,priority,updated,assignee",
-    )
+    data = _jira_search(jql, "summary,status,priority,updated,assignee", max_results)
     issues = []
     for issue in data.get("issues", []):
         fields = issue.get("fields", {})
