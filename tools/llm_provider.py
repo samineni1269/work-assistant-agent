@@ -898,7 +898,12 @@ def _to_claude_tools(tools: list) -> list:
 
 
 def _to_openai_tools(tools: list) -> list:
-    """Convert neutral tools to OpenAI/OpenRouter tool format."""
+    """Convert neutral tools to OpenAI/OpenRouter tool format.
+
+    MiniMax (and some other providers) reject tool parameters that are missing
+    a 'description' field.  This function adds a sensible fallback description
+    to any parameter that doesn't have one, so the schema is always valid.
+    """
     result = []
     for tool in tools:
         params = dict(tool.get("parameters", {}))
@@ -906,6 +911,14 @@ def _to_openai_tools(tools: list) -> list:
             params["type"] = "object"
         if "properties" not in params:
             params["properties"] = {}
+        # Ensure every parameter has a description (required by some providers)
+        fixed_props = {}
+        for pname, pdef in params["properties"].items():
+            pdef = dict(pdef)
+            if not pdef.get("description"):
+                pdef["description"] = pname.replace("_", " ").capitalize()
+            fixed_props[pname] = pdef
+        params["properties"] = fixed_props
         result.append({
             "type": "function",
             "function": {
