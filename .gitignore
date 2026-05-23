@@ -60,3 +60,5 @@ knowledge_base/
 *.tmp
 =3.0.0
 corrections.json
+self_learning.json
+self_learning.tmp
