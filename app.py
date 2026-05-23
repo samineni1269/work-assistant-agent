@@ -2224,6 +2224,7 @@ _PAGE_NAV = """
     <a href="/guardrails-page" class="nav-link">🛡 Guardrails</a>
     <a href="/kb-page" class="nav-link">🧠 Knowledge Base</a>
     <a href="/alerts-page" class="nav-link">🔔 Alerts</a>
+    <a href="/self-learning-page" class="nav-link">🧬 Self-Learning</a>
   </div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span style="font-size:10px;color:#3a4060;font-weight:700;letter-spacing:.5px;flex-shrink:0">TOOLS:</span>
