@@ -5582,6 +5582,165 @@ loadEvents('all',document.querySelector('.whtab'));
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SELF-LEARNING DASHBOARD — APIs + Page
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/alert-feedback", methods=["POST"])
+def api_alert_feedback():
+    """Record user feedback on an alert (Feature 6 — Proactive Alert Tuning)."""
+    data = request.get_json(silent=True) or {}
+    alert_type = data.get("alert_type", "")
+    action = data.get("action", "")   # "dismissed" or "acted"
+    if alert_type and action in ("dismissed", "acted"):
+        try:
+            from tools.self_learning import record_alert_action
+            record_alert_action(alert_type, action)
+        except Exception:
+            pass
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/corrections", methods=["GET"])
+def api_get_corrections():
+    """Return stored corrections for the UI."""
+    try:
+        from tools.corrections import get_all_corrections
+        return jsonify(get_all_corrections())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/corrections/<int:idx>", methods=["DELETE"])
+def api_delete_correction(idx):
+    """Delete a correction by index."""
+    try:
+        from tools.corrections import delete_correction
+        delete_correction(idx)
+        return jsonify({"status": "deleted"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/self-learning", methods=["GET"])
+def api_self_learning_state():
+    """Return full self-learning state for the dashboard."""
+    try:
+        from tools.self_learning import get_full_state, get_query_clusters, get_skipped_tools, get_optimal_briefing_hour
+        return jsonify({
+            "state":            get_full_state(),
+            "query_clusters":   get_query_clusters(),
+            "skipped_tools":    get_skipped_tools(),
+            "briefing_hour":    get_optimal_briefing_hour(),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auto-ingest/run", methods=["POST"])
+def api_run_auto_ingest():
+    """Manually trigger auto-ingestion (Feature 7)."""
+    try:
+        from tools.auto_ingest import run_auto_ingest
+        summary = run_auto_ingest()
+        return jsonify(summary)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/self-learning-page")
+def self_learning_page():
+    return f"""<!DOCTYPE html>
+<html><head><title>Self-Learning — Work Assistant</title>
+<style>
+  body {{ font-family: system-ui; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }}
+  h1 {{ color: #818cf8; }} h2 {{ color: #94a3b8; border-bottom: 1px solid #334155; padding-bottom: 8px; }}
+  .card {{ background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 20px; }}
+  .badge {{ display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; margin: 2px; }}
+  .high {{ background: #16a34a; }} .muted {{ background: #dc2626; }} .normal {{ background: #475569; }}
+  table {{ width: 100%; border-collapse: collapse; }}
+  td, th {{ padding: 8px 12px; text-align: left; border-bottom: 1px solid #334155; }}
+  button {{ background: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; }}
+  .run-btn {{ background: #6366f1; padding: 8px 18px; border-radius: 8px; border: none; color: white; cursor: pointer; font-size: 14px; }}
+</style></head>
+<body>
+  <h1>🧠 Self-Learning Dashboard</h1>
+
+  <div class="card">
+    <h2>⚡ Query Clusters (most common patterns)</h2>
+    <div id="clusters">Loading...</div>
+  </div>
+
+  <div class="card">
+    <h2>🔧 Tool Error Avoidance</h2>
+    <div id="skipped">Loading...</div>
+  </div>
+
+  <div class="card">
+    <h2>⏰ Smart Briefing Time</h2>
+    <p>Optimal hour based on your app-open patterns: <strong id="briefing-hour">...</strong></p>
+  </div>
+
+  <div class="card">
+    <h2>✏️ Corrections Memory</h2>
+    <table><thead><tr><th>Correction</th><th>Times</th><th>Delete</th></tr></thead>
+    <tbody id="corrections-tbody"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>📚 Auto Knowledge Base Ingestion</h2>
+    <button class="run-btn" onclick="runIngest()">▶ Run Now</button>
+    <pre id="ingest-result" style="margin-top:12px;color:#94a3b8;"></pre>
+  </div>
+
+<script>
+async function load() {{
+  const r = await fetch('/api/self-learning');
+  const d = await r.json();
+
+  document.getElementById('briefing-hour').textContent = d.briefing_hour + ':00';
+
+  const clusters = d.query_clusters || [];
+  document.getElementById('clusters').innerHTML = clusters.length
+    ? '<table><thead><tr><th>Pattern</th><th>Count</th></tr></thead><tbody>' +
+      clusters.map(c => `<tr><td>${{c.label}}</td><td>${{c.count}}</td></tr>`).join('') +
+      '</tbody></table>'
+    : '<p style="color:#64748b">No clusters yet — chat more with the agent!</p>';
+
+  const skipped = d.skipped_tools || [];
+  document.getElementById('skipped').innerHTML = skipped.length
+    ? skipped.map(t => `<span class="badge muted">⚠ ${{t}}</span>`).join(' ')
+    : '<span style="color:#64748b">No tools are being skipped</span>';
+}}
+
+async function loadCorrections() {{
+  const r = await fetch('/api/corrections');
+  const data = await r.json();
+  const tbody = document.getElementById('corrections-tbody');
+  tbody.innerHTML = data.map((c, i) =>
+    `<tr><td>${{c.correction}}</td><td>${{c.count}}</td>
+     <td><button onclick="deleteCorrection(${{i}})">✕</button></td></tr>`
+  ).join('');
+}}
+
+async function deleteCorrection(idx) {{
+  await fetch('/api/corrections/' + idx, {{method: 'DELETE'}});
+  loadCorrections();
+}}
+
+async function runIngest() {{
+  document.getElementById('ingest-result').textContent = 'Running...';
+  const r = await fetch('/api/auto-ingest/run', {{method: 'POST'}});
+  const d = await r.json();
+  document.getElementById('ingest-result').textContent = JSON.stringify(d, null, 2);
+}}
+
+load();
+loadCorrections();
+</script>
+</body></html>"""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -5605,6 +5764,12 @@ def main():
     except Exception as e:
         print(f"     Daily briefing:       ⚠️  unavailable ({e})")
 
+    try:
+        from tools.auto_ingest import start_auto_ingest_scheduler
+        start_auto_ingest_scheduler()
+    except Exception as e:
+        print(f"[auto_ingest] scheduler not started: {e}")
+
     # Cloudflare tunnel
     threading.Thread(target=_start_tunnel, daemon=True).start()
 
@@ -5613,6 +5778,13 @@ def main():
 
     print(f"\n🚀  Work Assistant starting at http://localhost:{PORT}")
     print(f"     Press Ctrl+C to stop.\n")
+
+    # Smart briefing timing — record app open (Feature 4)
+    try:
+        from tools.self_learning import record_app_open
+        record_app_open()
+    except Exception:
+        pass
 
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True, use_reloader=False)
 
