@@ -98,15 +98,41 @@ def send_email(
 
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    # Send via Gmail SMTP with TLS
     recipients = [to] + ([cc] if cc else [])
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as smtp:
-        smtp.ehlo()
-        smtp.starttls()
-        smtp.login(sender, app_password)
-        smtp.sendmail(sender, recipients, msg.as_string())
+    raw = msg.as_string()
 
-    return {"status": "sent", "to": to, "subject": subject, "from": sender}
+    # Try port 587 (STARTTLS) first, fall back to port 465 (SSL)
+    last_error = None
+    for _attempt, (port, use_ssl) in enumerate([(587, False), (465, True)], 1):
+        try:
+            if use_ssl:
+                import ssl as _ssl
+                ctx = _ssl.create_default_context()
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30, context=ctx) as smtp:
+                    smtp.login(sender, app_password)
+                    smtp.sendmail(sender, recipients, raw)
+            else:
+                with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as smtp:
+                    smtp.ehlo()
+                    smtp.starttls()
+                    smtp.ehlo()
+                    smtp.login(sender, app_password)
+                    smtp.sendmail(sender, recipients, raw)
+            # Success
+            return {"status": "sent", "to": to, "subject": subject, "from": sender, "port": port}
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise RuntimeError(
+        f"Gmail SMTP failed on both port 587 and 465.\n"
+        f"Last error: {last_error}\n"
+        f"Check:\n"
+        f"  1. GMAIL_APP_PASSWORD is correct (visit myaccount.google.com/apppasswords)\n"
+        f"  2. 2-Step Verification is ON for {sender}\n"
+        f"  3. 'Less secure app access' is NOT needed — App Passwords bypass that\n"
+        f"  4. No network/firewall blocking outbound port 587 or 465"
+    )
 
 
 def send_html_email(

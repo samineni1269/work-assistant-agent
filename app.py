@@ -2952,16 +2952,50 @@ def send_draft():
     if not draft:
         return jsonify({"ok": False, "error": "No draft provided"}), 400
     try:
-        # Try to send via M365 if configured
-        from tools.ms365 import send_email
-        # Extract a recipient from context if available (basic heuristic)
-        import re as _re
+        import re as _re, os as _os
         emails = _re.findall(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b',
                               email_context)
         if not emails:
             return jsonify({"ok": False, "error": "No recipient found in email context. Copy the draft manually."}), 400
-        result = send_email(to=emails[0], subject="Re: (Work Assistant draft)", body=draft)
+        to = emails[0]
+        if _os.getenv("GMAIL_APP_PASSWORD", "").strip():
+            from tools.gmail_smtp import send_email
+        else:
+            from tools.ms365 import send_email
+        result = send_email(to=to, subject="Re: (Work Assistant draft)", body=draft)
         return jsonify({"ok": True, "result": str(result)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── Direct email send (bypasses agent — always uses Gmail SMTP) ───────────────
+
+@app.route("/email/send", methods=["POST"])
+def email_send_direct():
+    """
+    Send an email directly via Gmail SMTP, bypassing the agent entirely.
+    Body: { "to": "...", "subject": "...", "body": "...", "html_body": "..." (optional) }
+    """
+    data = request.get_json(force=True) or {}
+    to      = (data.get("to")      or "").strip()
+    subject = (data.get("subject") or "").strip()
+    body    = (data.get("body")    or "").strip()
+    html_body = data.get("html_body", "")
+
+    if not to or not subject or not body:
+        return jsonify({"ok": False, "error": "Missing required fields: to, subject, body"}), 400
+
+    # Prefer Gmail SMTP; fall back to MS365 if not configured
+    try:
+        import os as _os
+        if _os.getenv("GMAIL_APP_PASSWORD", "").strip():
+            from tools.gmail_smtp import send_email as gmail_send
+            result = gmail_send(to=to, subject=subject, body=body,
+                                html_body=html_body if html_body else None)
+        else:
+            from tools.ms365 import send_email as ms_send
+            result = ms_send(to=to, subject=subject, body=body)
+        return jsonify({"ok": True, "result": result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
