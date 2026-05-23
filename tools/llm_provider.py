@@ -1296,8 +1296,101 @@ class MiniMaxProvider(OpenAIProvider):
             base_url=self._base_url,
         )
 
+    # MiniMax has a ~32 tool limit per request — group tools by domain
+    _TOOL_GROUPS = {
+        "email":    {"get_emails","get_email_body","send_email","search_emails"},
+        "calendar": {"get_calendar_events","create_calendar_event","find_free_slots",
+                     "list_google_calendar_events","create_google_meet"},
+        "teams":    {"get_teams_chats","get_chat_messages","send_teams_message",
+                     "list_teams","get_channel_messages","post_channel_message"},
+        "slack":    {"list_slack_channels","get_slack_messages","get_slack_thread",
+                     "list_slack_dms","get_slack_dm_history","search_slack",
+                     "get_slack_user_info","send_slack_message"},
+        "jira":     {"get_my_jira_issues","search_jira","get_jira_issue",
+                     "create_jira_issue","update_jira_issue","transition_jira_issue",
+                     "add_jira_comment","get_jira_projects"},
+        "confluence":{"search_confluence","get_confluence_page","create_confluence_page",
+                     "update_confluence_page","list_confluence_spaces"},
+        "github":   {"get_my_open_prs","get_github_notifications","get_my_review_requests",
+                     "list_my_repos","list_pull_requests","get_pull_request","get_pr_checks",
+                     "get_repo_workflow_runs","search_github","list_my_github_issues",
+                     "create_github_issue","add_pr_review","merge_pull_request"},
+        "linear":   {"get_my_linear_issues","search_linear_issues","get_linear_issue",
+                     "list_linear_teams","list_linear_workflow_states","list_linear_projects",
+                     "create_linear_issue","update_linear_issue","transition_linear_issue",
+                     "add_linear_comment"},
+        "sharepoint":{"search_sharepoint","list_sharepoint_files","get_sharepoint_sites",
+                     "upload_file_to_sharepoint"},
+        "excel":    {"create_excel_workbook","read_excel_sheet","write_excel_cell",
+                     "append_excel_row","list_excel_sheets"},
+        "docs":     {"read_word_document","list_word_headings","create_word_document",
+                     "list_documents","delete_document","update_word_document",
+                     "read_presentation","get_presentation_summary","create_presentation",
+                     "add_slide_to_presentation"},
+        "zoom":     {"list_zoom_meetings","get_zoom_meeting","create_zoom_meeting",
+                     "list_zoom_recordings"},
+        "notion":   {"search_notion","get_notion_page","create_notion_page",
+                     "list_notion_databases","query_notion_database"},
+        "general":  {"search_knowledge_base","browse_url","search_web","update_memory_entry",
+                     "get_memory_summary","get_analytics_summary","extract_action_items",
+                     "get_my_action_items","complete_action_item","score_notifications",
+                     "send_morning_briefing","get_webhook_events"},
+    }
+
+    # Keywords that activate each group
+    _GROUP_KEYWORDS = {
+        "email":     ["email","mail","inbox","outlook","message","send","reply","unread"],
+        "calendar":  ["calendar","meeting","schedule","event","slot","availability","book"],
+        "teams":     ["teams","channel","chat","microsoft teams"],
+        "slack":     ["slack","dm","channel"],
+        "jira":      ["jira","ticket","issue","sprint","bug","story","epic"],
+        "confluence":["confluence","wiki","page","space","documentation"],
+        "github":    ["github","pr","pull request","repo","commit","branch","workflow","notification"],
+        "linear":    ["linear","issue","roadmap"],
+        "sharepoint":["sharepoint","onedrive","file","document","folder"],
+        "excel":     ["excel","spreadsheet","worksheet","workbook"],
+        "docs":      ["word","document","presentation","slide","deck","docx","pptx"],
+        "zoom":      ["zoom","recording","webinar"],
+        "notion":    ["notion","database","page"],
+        "general":   [],  # always included
+    }
+
+    _MINIMAX_TOOL_LIMIT = 30
+
+    def _select_tools(self, tools: list, history: list) -> list:
+        """Return at most _MINIMAX_TOOL_LIMIT tools relevant to the current conversation."""
+        # Get the last few user messages to detect intent
+        recent_text = " ".join(
+            m.get("content", "") or ""
+            for m in history[-6:]
+            if m.get("role") == "user"
+        ).lower()
+
+        tool_lookup = {t["name"]: t for t in tools}
+
+        # Always include general tools
+        selected = set(self._TOOL_GROUPS.get("general", set()))
+
+        # Add groups whose keywords appear in recent messages
+        for group, keywords in self._GROUP_KEYWORDS.items():
+            if group == "general":
+                continue
+            if any(kw in recent_text for kw in keywords):
+                selected |= self._TOOL_GROUPS.get(group, set())
+
+        # If nothing matched (fresh conversation), include email + calendar + general
+        if len(selected) <= len(self._TOOL_GROUPS.get("general", set())):
+            selected |= self._TOOL_GROUPS.get("email", set())
+            selected |= self._TOOL_GROUPS.get("calendar", set())
+
+        # Build filtered list preserving original order, capped at limit
+        filtered = [t for t in tools if t["name"] in selected]
+        return filtered[:self._MINIMAX_TOOL_LIMIT]
+
     def run_turn(self, system, history, tools):
         import re
+        # MiniMax rejects requests with too many tools — select relevant subset
+        tools = self._select_tools(tools, history)
         try:
             tool_calls, text = super().run_turn(system, history, tools)
         except Exception as e:
