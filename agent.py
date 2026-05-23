@@ -206,26 +206,24 @@ def _with_retry(fn, tool_name: str, max_attempts: int = 3) -> str:
 
 
 def _send_email_with_log(ms, args: dict):
-    """Send email via Outlook if authenticated, else fall back to Gmail. Logs path taken."""
-    auth = ms.is_authenticated()
-    print(f"\n[SEND_EMAIL] is_authenticated={auth}  args={list(args.keys())}")
-    if auth:
-        try:
-            result = ms.send_email(**args)
-            print(f"[SEND_EMAIL] Outlook send SUCCESS: {result}")
-            return result
-        except Exception as e:
-            print(f"[SEND_EMAIL] Outlook send FAILED: {e}")
-            raise
-    else:
-        print("[SEND_EMAIL] Outlook not connected — trying Gmail SMTP fallback")
+    """Send email via Gmail SMTP (reliable), falling back to Outlook Graph if Gmail is not configured."""
+    import os
+    gmail_configured = bool(os.getenv("GMAIL_USER") and os.getenv("GMAIL_APP_PASSWORD"))
+    if gmail_configured:
+        print(f"\n[SEND_EMAIL] Routing via Gmail SMTP (Outlook tenant blocked outbound delivery)")
         try:
             result = _gmail().send_email(**args)
-            print(f"[SEND_EMAIL] Gmail send SUCCESS: {result}")
+            print(f"[SEND_EMAIL] Gmail SMTP SUCCESS: {result}")
             return result
         except Exception as e:
-            print(f"[SEND_EMAIL] Gmail send FAILED: {e}")
-            raise
+            print(f"[SEND_EMAIL] Gmail SMTP FAILED: {e} — trying Outlook fallback")
+    # Fallback: Outlook Graph API
+    if ms.is_authenticated():
+        print(f"[SEND_EMAIL] Trying Outlook Graph API")
+        result = ms.send_email(**args)
+        print(f"[SEND_EMAIL] Outlook SUCCESS: {result}")
+        return result
+    raise RuntimeError("No email provider available — configure GMAIL_USER/GMAIL_APP_PASSWORD or connect Outlook")
 
 
 def dispatch_tool(name: str, args: dict) -> str:
