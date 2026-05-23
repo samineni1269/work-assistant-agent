@@ -35,9 +35,16 @@ def _get_db() -> sqlite3.Connection:
             priority    TEXT    DEFAULT 'medium',
             status      TEXT    DEFAULT 'open',
             extracted_at TEXT   NOT NULL,
-            completed_at TEXT   DEFAULT ''
+            completed_at TEXT   DEFAULT '',
+            depends_on  TEXT    DEFAULT '[]'
         )
     """)
+    # Migration: add depends_on if it's an existing DB without the column
+    try:
+        conn.execute("ALTER TABLE action_items ADD COLUMN depends_on TEXT DEFAULT '[]'")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
     conn.commit()
     return conn
 
@@ -142,9 +149,11 @@ def save_action_items(items: list[dict]) -> int:
         task = item.get("task", "").strip()
         if not task:
             continue
+        import json as _json
+        depends_on = _json.dumps(item.get("depends_on", []))
         conn.execute("""
-            INSERT INTO action_items (task, owner, due_date, source, priority, status, extracted_at)
-            VALUES (?, ?, ?, ?, ?, 'open', ?)
+            INSERT INTO action_items (task, owner, due_date, source, priority, status, extracted_at, depends_on)
+            VALUES (?, ?, ?, ?, ?, 'open', ?, ?)
         """, (
             task,
             item.get("owner", ""),
@@ -152,6 +161,7 @@ def save_action_items(items: list[dict]) -> int:
             item.get("source", "manual"),
             item.get("priority", "medium"),
             now,
+            depends_on,
         ))
         count += 1
     conn.commit()
@@ -229,6 +239,22 @@ def delete_action_item(item_id: int) -> dict:
     conn.commit()
     conn.close()
     return {"status": "deleted", "id": item_id}
+
+
+def set_depends_on(item_id: int, depends_on: list[int]) -> dict:
+    """
+    Set the dependency list for an action item.
+    depends_on: list of item IDs that must be completed before this one.
+    """
+    import json
+    conn = _get_db()
+    conn.execute(
+        "UPDATE action_items SET depends_on=? WHERE id=?",
+        (json.dumps(depends_on), item_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "updated", "id": item_id, "depends_on": depends_on}
 
 
 # ─────────────────────────────────────────────

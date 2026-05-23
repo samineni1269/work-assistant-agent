@@ -501,3 +501,136 @@ class TestPlannerMode:
 
     def test_onboard_keyword(self):
         assert self._is_complex("Can you help me onboard our new developer to the team repos and tools")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Scheduler tests (tools/scheduler.py)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _patch_scheduler_db(tmp_path):
+    """Redirect scheduler DB to a temp file for test isolation."""
+    import tools.scheduler as sched
+    sched.DB_PATH = tmp_path / "test_scheduler.db"
+    # Disable APScheduler so tests don't actually spin up background threads
+    sched._scheduler = None
+    return sched
+
+
+class TestScheduler:
+
+    def test_add_task_returns_dict(self, tmp_path):
+        sched = _patch_scheduler_db(tmp_path)
+        # Patch _schedule_task to a no-op so APScheduler isn't needed
+        with patch.object(sched, "_schedule_task", lambda t: None):
+            task = sched.add_task("morning brief", "0 8 * * *", "Give me my daily briefing")
+        assert task["id"] == 1
+        assert task["name"] == "morning brief"
+        assert task["cron_expr"] == "0 8 * * *"
+        assert task["query"] == "Give me my daily briefing"
+        assert task["enabled"] == 1
+
+    def test_list_tasks_empty_initially(self, tmp_path):
+        sched = _patch_scheduler_db(tmp_path)
+        assert sched.list_tasks() == []
+
+    def test_list_tasks_returns_added(self, tmp_path):
+        sched = _patch_scheduler_db(tmp_path)
+        with patch.object(sched, "_schedule_task", lambda t: None):
+            sched.add_task("t1", "0 9 * * *", "Check emails")
+            sched.add_task("t2", "0 10 * * 1", "Weekly review")
+        tasks = sched.list_tasks()
+        assert len(tasks) == 2
+        names = {t["name"] for t in tasks}
+        assert names == {"t1", "t2"}
+
+    def test_delete_task(self, tmp_path):
+        sched = _patch_scheduler_db(tmp_path)
+        with patch.object(sched, "_schedule_task", lambda t: None):
+            with patch.object(sched, "_unschedule_task", lambda tid: None):
+                task = sched.add_task("to_delete", "*/30 * * * *", "ping")
+                result = sched.delete_task(task["id"])
+        assert result["status"] == "deleted"
+        assert sched.list_tasks() == []
+
+    def test_toggle_task_disables(self, tmp_path):
+        sched = _patch_scheduler_db(tmp_path)
+        with patch.object(sched, "_schedule_task", lambda t: None):
+            with patch.object(sched, "_unschedule_task", lambda tid: None):
+                task = sched.add_task("togglable", "0 0 * * *", "midnight run")
+                updated = sched.toggle_task(task["id"], False)
+        assert updated["enabled"] == 0
+
+    def test_toggle_task_re_enables(self, tmp_path):
+        sched = _patch_scheduler_db(tmp_path)
+        with patch.object(sched, "_schedule_task", lambda t: None):
+            with patch.object(sched, "_unschedule_task", lambda tid: None):
+                task = sched.add_task("togglable2", "0 0 * * *", "midnight run 2")
+                sched.toggle_task(task["id"], False)
+                updated = sched.toggle_task(task["id"], True)
+        assert updated["enabled"] == 1
+
+    def test_update_last_run(self, tmp_path):
+        sched = _patch_scheduler_db(tmp_path)
+        with patch.object(sched, "_schedule_task", lambda t: None):
+            task = sched.add_task("runner", "* * * * *", "run something")
+        sched.update_last_run(task["id"], "Done!")
+        tasks = sched.list_tasks()
+        assert tasks[0]["run_count"] == 1
+        assert tasks[0]["last_result"] == "Done!"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Action item depends_on tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestActionItemDependencies:
+
+    def test_set_depends_on(self, tmp_path):
+        ai = _patch_actions_db(tmp_path)
+        ai.save_action_items([
+            {"task": "Task A", "owner": "me", "due_date": "", "priority": "high", "source": "test"},
+            {"task": "Task B", "owner": "me", "due_date": "", "priority": "medium", "source": "test"},
+        ])
+        items = ai.get_my_action_items()
+        id_a = items[0]["id"]
+        id_b = items[1]["id"]
+        result = ai.set_depends_on(id_b, [id_a])
+        assert result["status"] == "updated"
+        assert result["depends_on"] == [id_a]
+
+    def test_depends_on_stored_as_json(self, tmp_path):
+        ai = _patch_actions_db(tmp_path)
+        ai.save_action_items([
+            {"task": "Prereq", "owner": "me", "due_date": "", "priority": "high", "source": "test"},
+            {"task": "Dependent", "owner": "me", "due_date": "", "priority": "low", "source": "test"},
+        ])
+        items = ai.get_my_action_items()
+        id_prereq = items[0]["id"]
+        id_dep = items[1]["id"]
+        ai.set_depends_on(id_dep, [id_prereq])
+        # Re-fetch and verify the column contains valid JSON
+        import json as _json
+        items2 = ai.get_my_action_items()
+        dep_item = next(i for i in items2 if i["id"] == id_dep)
+        parsed = _json.loads(dep_item["depends_on"])
+        assert parsed == [id_prereq]
+
+    def test_depends_on_default_empty_list(self, tmp_path):
+        ai = _patch_actions_db(tmp_path)
+        ai.save_action_items([
+            {"task": "Standalone", "owner": "me", "due_date": "", "priority": "medium", "source": "test"},
+        ])
+        items = ai.get_my_action_items()
+        import json as _json
+        parsed = _json.loads(items[0]["depends_on"])
+        assert parsed == []
+
+    def test_delete_action_item(self, tmp_path):
+        ai = _patch_actions_db(tmp_path)
+        ai.save_action_items([
+            {"task": "To delete", "owner": "me", "due_date": "", "priority": "low", "source": "test"},
+        ])
+        items = ai.get_my_action_items()
+        result = ai.delete_action_item(items[0]["id"])
+        assert result["status"] == "deleted"
+        assert ai.get_my_action_items() == []

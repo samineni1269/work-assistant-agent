@@ -786,7 +786,9 @@ def _build_plan(user_message: str, provider) -> str:
 
 
 def run_agent_turn(conversation_history: list, user_message: str,
-                   auto_confirm: bool = False) -> tuple[str, list, list]:
+                   auto_confirm: bool = False,
+                   max_iterations: int = 10,
+                   progress_callback=None) -> tuple[str, list, list]:
     """
     Run one turn of the agent loop using the configured LLM provider.
 
@@ -838,6 +840,7 @@ def run_agent_turn(conversation_history: list, user_message: str,
     working_history = _summarise_history(conversation_history, provider)
 
     tool_call_count = 0   # tracked for bulk_protection
+    iteration_count = 0   # cap runaway loops
 
     system_prompt = _build_system_prompt()
 
@@ -852,6 +855,18 @@ def run_agent_turn(conversation_history: list, user_message: str,
             pass  # silent fallback — run without plan header
 
     while True:
+        iteration_count += 1
+        if iteration_count > max_iterations:
+            cap_msg = (
+                f"⚠️ Reached the maximum number of reasoning iterations ({max_iterations}). "
+                "Stopping to prevent an infinite loop. Please try a more specific request."
+            )
+            warnings.append(cap_msg)
+            final_turn = {"role": "assistant", "content": cap_msg}
+            conversation_history.append(final_turn)
+            working_history.append(final_turn)
+            return cap_msg, conversation_history, warnings
+
         # run_turn returns (tool_calls, text)
         #   tool_calls: list of (name, args, call_id) — non-empty when model wants a tool
         #   text: final response string — non-empty when model is done
@@ -884,6 +899,17 @@ def run_agent_turn(conversation_history: list, user_message: str,
                 pass
 
             return text, conversation_history, warnings
+
+        # Report progress if callback provided
+        if progress_callback and tool_calls:
+            try:
+                progress_callback({
+                    "type": "tool_calls",
+                    "iteration": iteration_count,
+                    "tools": [n for n, _, _ in tool_calls],
+                })
+            except Exception:
+                pass
 
         # Model wants to call tools — record in BOTH histories
         tool_turn = {

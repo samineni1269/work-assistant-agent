@@ -77,20 +77,34 @@ def _build_msal_app() -> msal.PublicClientApplication:
     return app, cache
 
 
-def get_access_token() -> str:
+def get_access_token(force_refresh: bool = False) -> str:
     """
     Get a valid access token for Microsoft Graph.
+
     Uses cached token if available; triggers device code flow if not.
+    MSAL's acquire_token_silent() automatically uses the refresh token
+    to obtain a new access token when the cached one has expired.
+
+    Args:
+        force_refresh: If True, bypass the in-memory token cache and
+                       force MSAL to use the refresh token, obtaining a
+                       brand-new access token from the server.  Useful
+                       when a Graph API call comes back with a 401 despite
+                       having a cached token (clock skew, early revocation).
     """
     app, cache = _build_msal_app()
 
-    # Try silent token first (uses cached refresh token)
+    # Try silent token first (uses cached refresh token automatically)
     accounts = app.get_accounts()
     result = None
     if accounts:
-        result = app.acquire_token_silent(GRAPH_SCOPES, account=accounts[0])
+        result = app.acquire_token_silent(
+            GRAPH_SCOPES,
+            account=accounts[0],
+            force_refresh=force_refresh,   # ← NEW: force server round-trip when needed
+        )
 
-    # If no cached token, do device code flow
+    # If no cached token (first run), do device code flow
     if not result or "access_token" not in result:
         flow = app.initiate_device_flow(scopes=GRAPH_SCOPES)
         if "user_code" not in flow:
@@ -107,15 +121,22 @@ def get_access_token() -> str:
     if "access_token" not in result:
         raise RuntimeError(f"Authentication failed: {result.get('error_description', result.get('error'))}")
 
-    # Save updated cache
+    # Persist any cache changes (new access token, rotated refresh token)
     if cache.has_state_changed:
         TOKEN_CACHE_PATH.write_text(cache.serialize())
 
     return result["access_token"]
 
 
-def _graph(method: str, endpoint: str, **kwargs) -> dict:
-    """Make an authenticated Microsoft Graph API call."""
+def _graph(method: str, endpoint: str, _retry_on_401: bool = True, **kwargs) -> dict:
+    """
+    Make an authenticated Microsoft Graph API call.
+
+    Automatically retries once on a 401 Unauthorized response by force-
+    refreshing the access token via the MSAL refresh-token grant.  This
+    handles the edge case where the cached token was valid at call time
+    but was already expired or revoked server-side.
+    """
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -123,6 +144,15 @@ def _graph(method: str, endpoint: str, **kwargs) -> dict:
     }
     url = f"{GRAPH_BASE}{endpoint}"
     response = requests.request(method, url, headers=headers, **kwargs)
+
+    # Auto-refresh on 401: token may have just expired between cache read and server check
+    if response.status_code == 401 and _retry_on_401:
+        try:
+            token = get_access_token(force_refresh=True)
+            headers["Authorization"] = f"Bearer {token}"
+            response = requests.request(method, url, headers=headers, **kwargs)
+        except Exception:
+            pass  # Fall through to error handling below
 
     if response.status_code == 204:
         return {"status": "success"}

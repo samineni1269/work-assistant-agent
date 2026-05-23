@@ -747,6 +747,10 @@ body{background:#16181d;color:#d4d8e8;font-family:-apple-system,BlinkMacSystemFo
     <a href="/actions-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">✅</span> Action Items Board</a>
     <a href="/triggers-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">⚡</span> Automation Rules</a>
     <a href="/memory-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">🧠</span> Memory Viewer</a>
+    <a href="/scheduler-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">🕐</span> Scheduler</a>
+    <a href="/search-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">🔍</span> Global Search</a>
+    <a href="/inbox-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">📧</span> Email Inbox</a>
+    <a href="/calendar-page" target="_blank" style="display:flex;align-items:center;gap:8px;padding:5px 14px;color:#8892b0;font-size:11.5px;text-decoration:none;transition:background .12s,color .12s" onmouseover="this.style.background='#21232e';this.style.color='#d4d8e8'" onmouseout="this.style.background='';this.style.color='#8892b0'"><span style="font-size:13px">📅</span> Calendar</a>
   </div>
 
   <!-- Connections & bottom links -->
@@ -1026,25 +1030,7 @@ async function dispatch(txt) {
   }
 }
 
-async function poll(job_id) {
-  for (;;) {
-    await new Promise(r => setTimeout(r, 600));
-    const j = await (await fetch('/poll/' + job_id)).json();
-    if (j.status === 'done') {
-      removeThinking();
-      addMsg('assistant', j.response);
-      if (j.warnings && j.warnings.length) {
-        const chat = document.getElementById('chat');
-        j.warnings.forEach(w => {
-          const d = document.createElement('div'); d.className='mwarn'; d.textContent=w; chat.appendChild(d);
-        });
-        chat.scrollTop = chat.scrollHeight;
-      }
-      setStatus('ready'); return;
-    }
-    if (j.status === 'error') {removeThinking(); addMsg('error', j.response); setStatus('error'); return;}
-  }
-}
+// poll() is defined below with progress tracking support
 
 function setStatus(s) {
   const e = document.getElementById('status-dot');
@@ -1213,20 +1199,8 @@ function toggleVoice() {
   _recog.start();
 }
 
-// ── SSE proactive alerts ──────────────────────────────────────────────────────
+// ── SSE proactive alerts (startSSEWithNotifs defined below) ──────────────────
 const _alerts = [];
-function startSSE() {
-  try {
-    const es = new EventSource('/stream');
-    es.onmessage = e => {
-      try {
-        const a = JSON.parse(e.data); _alerts.unshift(a);
-        document.getElementById('bell-dot').style.display='block';
-        document.getElementById('bell-btn').textContent='🔔';
-      } catch(err){}
-    };
-  } catch(e){}
-}
 function renderTray() {
   const t = document.getElementById('alert-tray');
   if (!_alerts.length) {t.innerHTML='<div style="padding:8px 10px;color:#6b7394;font-size:11px">No alerts</div>';return;}
@@ -1456,8 +1430,195 @@ function _escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+async function restoreSession(id, title) {
+  const turns = await fetch(`/history/${id}`).then(r => r.json()).catch(() => []);
+  const chat = document.getElementById('chat');
+  const wlc = document.getElementById('welcome');
+  if (wlc) wlc.remove();
+  const banner = document.createElement('div');
+  banner.style.cssText = 'text-align:center;opacity:.4;font-size:11px;padding:8px';
+  banner.textContent = '📂 Restored: ' + title;
+  chat.appendChild(banner);
+  turns.forEach(t => addMsg(t.role === 'user' ? 'user' : 'assistant', t.content));
+  closeHistory();
+}
+
+// loadHistory, searchHistory, exportConversation defined below
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement?.tagName;
+  const typing = tag === 'TEXTAREA' || tag === 'INPUT';
+
+  // Cmd+Enter / Ctrl+Enter — send message (even while focused in textarea)
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault(); send(); return;
+  }
+  // Esc — close all overlays/panels
+  if (e.key === 'Escape') {
+    closeHistory();
+    closeModelPicker();
+    document.getElementById('tone-panel').style.display='none';
+    document.getElementById('draft-modal')?.classList.remove('open');
+    document.getElementById('alert-tray').style.display='none';
+    return;
+  }
+  // Cmd+K / Ctrl+K — open tool picker / focus search
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    // Toggle tool picker: open nav search or focus text input
+    const inp = document.getElementById('inp');
+    if (inp) { inp.focus(); inp.select(); }
+    return;
+  }
+  // Cmd+/ — open model picker
+  if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+    e.preventDefault();
+    toggleModelPicker();
+    return;
+  }
+});
+
+// ── Browser push notifications ────────────────────────────────────────────────
+let _notifPermission = 'default';
+async function requestNotifPermission() {
+  if (!('Notification' in window)) return;
+  try {
+    _notifPermission = await Notification.requestPermission();
+  } catch(e) {}
+}
+function sendBrowserNotif(title, body) {
+  if (_notifPermission !== 'granted') return;
+  try {
+    const n = new Notification(title, {body, icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text y="28" font-size="28">⚡</text></svg>'});
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => n.close(), 8000);
+  } catch(e) {}
+}
+
+// Wire push notifs to the SSE alert stream
+function startSSEWithNotifs() {
+  try {
+    const es = new EventSource('/stream');
+    es.onmessage = e => {
+      try {
+        const a = JSON.parse(e.data); _alerts.unshift(a);
+        document.getElementById('bell-dot').style.display='block';
+        // Fire browser push notification for urgent alerts
+        if (a.type === 'urgent' || a.priority === 'urgent') {
+          sendBrowserNotif('⚡ Work Assistant Alert', a.message || 'Urgent item needs attention');
+        }
+      } catch(err){}
+    };
+  } catch(e){}
+}
+
+// ── Draft approval modal ──────────────────────────────────────────────────────
+function _injectDraftModal() {
+  if (document.getElementById('draft-modal')) return;
+  const el = document.createElement('div');
+  el.className = 'modal-overlay'; el.id = 'draft-modal';
+  el.onclick = e => { if(e.target===el) closeDraftModal(); };
+  el.innerHTML = `
+    <div style="background:#1a1c24;border:1px solid #2a2d3e;border-radius:10px;width:520px;max-width:96vw;padding:22px 24px;box-shadow:0 24px 64px rgba(0,0,0,.6);max-height:90vh;overflow-y:auto">
+      <div style="font-size:14px;font-weight:700;color:#d4d8e8;margin-bottom:4px">✍️ Draft Reply</div>
+      <div id="draft-orig-preview" style="font-size:10px;color:#6b7394;margin-bottom:14px;max-height:80px;overflow:hidden;text-overflow:ellipsis"></div>
+      <label style="font-size:11px;color:#8892b0;display:block;margin-bottom:5px">Edit before sending:</label>
+      <textarea id="draft-edit" rows="8" style="width:100%;background:#12141a;border:1px solid #2a2d3e;border-radius:5px;color:#d4d8e8;font-size:12.5px;padding:10px;outline:none;resize:vertical;font-family:inherit;line-height:1.6"></textarea>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button onclick="closeDraftModal()" style="background:#252836;color:#8892b0;border:none;border-radius:5px;padding:8px 16px;cursor:pointer;font-size:12px">Cancel</button>
+        <button onclick="copyDraft()" style="background:#1c2540;color:#64ffda;border:1px solid #2a4070;border-radius:5px;padding:8px 16px;cursor:pointer;font-size:12px;font-weight:600">📋 Copy</button>
+        <button onclick="sendDraft()" id="draft-send-btn" style="background:#e94560;color:#fff;border:none;border-radius:5px;padding:8px 18px;cursor:pointer;font-size:12px;font-weight:700">Send ↑</button>
+      </div>
+      <div id="draft-msg" style="font-size:11px;color:#50fa7b;margin-top:8px;text-align:right"></div>
+    </div>`;
+  document.body.appendChild(el);
+}
+
+let _draftEmailCtx = null;
+
+async function openDraftModal(emailBody, instruction) {
+  _injectDraftModal();
+  const modal = document.getElementById('draft-modal');
+  const edit = document.getElementById('draft-edit');
+  const orig = document.getElementById('draft-orig-preview');
+  const msg = document.getElementById('draft-msg');
+  orig.textContent = emailBody ? ('Re: ' + emailBody.slice(0, 200)) : '';
+  edit.value = 'Generating draft…';
+  msg.textContent = '';
+  modal.classList.add('open');
+  _draftEmailCtx = {emailBody, instruction};
+  try {
+    const r = await fetch('/draft-reply', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email_body: emailBody, instruction: instruction||''})
+    });
+    const d = await r.json();
+    edit.value = d.draft || d.error || '(empty)';
+  } catch(e) {
+    edit.value = 'Error generating draft: ' + e.message;
+  }
+}
+
+function closeDraftModal() {
+  document.getElementById('draft-modal')?.classList.remove('open');
+  _draftEmailCtx = null;
+}
+
+function copyDraft() {
+  const txt = document.getElementById('draft-edit')?.value || '';
+  navigator.clipboard.writeText(txt).then(() => {
+    document.getElementById('draft-msg').textContent = '✅ Copied to clipboard!';
+  });
+}
+
+async function sendDraft() {
+  const draft = document.getElementById('draft-edit')?.value?.trim();
+  if (!draft) return;
+  const btn = document.getElementById('draft-send-btn');
+  const msg = document.getElementById('draft-msg');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const r = await fetch('/send-draft', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({draft, email_context: _draftEmailCtx?.emailBody || ''})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.textContent = '✅ Sent!'; msg.style.color='#50fa7b';
+      setTimeout(() => closeDraftModal(), 1500);
+    } else {
+      msg.textContent = '❌ ' + (d.error || 'Failed'); msg.style.color='#ff5555';
+      btn.disabled = false; btn.textContent = 'Send ↑';
+    }
+  } catch(e) {
+    msg.textContent = '❌ ' + e.message; msg.style.color='#ff5555';
+    btn.disabled = false; btn.textContent = 'Send ↑';
+  }
+}
+
+// Expose globally so agent responses can trigger it via onclick
+window.openDraftModal = openDraftModal;
+
+// ── Conversation export ───────────────────────────────────────────────────────
+async function exportConversation(sessionId, title) {
+  try {
+    const r = await fetch(`/export/${sessionId}`);
+    const text = await r.text();
+    const blob = new Blob([text], {type:'text/markdown'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (title||'conversation').replace(/[^a-z0-9]/gi,'_').toLowerCase() + '.md';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) {addMsg('error','Export failed: '+e.message);}
+}
+
+// Update history panel to show export button
+const _origLoadHistory = loadHistory;
 async function loadHistory(q) {
-  const tool  = state.activeTool || '';
+  const tool  = _curTool || '';
   const url   = q
     ? `/history?q=${encodeURIComponent(q)}`
     : `/history?tool_id=${encodeURIComponent(tool)}`;
@@ -1470,31 +1631,54 @@ async function loadHistory(q) {
   }
   sessions.forEach(s => {
     const d = document.createElement('div');
-    d.style.cssText = 'background:var(--bg3);border-radius:6px;padding:8px 10px;cursor:pointer;'
-      + 'font-size:12px;border:1px solid transparent;';
+    d.style.cssText = 'background:#1e2028;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:12px;border:1px solid transparent;position:relative;';
     const dateStr = (s.updated_at || '').slice(0, 10);
-    d.innerHTML = `<div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_escHtml(s.title)}</div>
-      <div style="opacity:.5;font-size:10px;margin-top:2px">${_escHtml(s.tool_id)} · ${s.turn_count} turns · ${dateStr}</div>`;
-    d.onmouseover = () => d.style.borderColor = 'var(--accent)';
+    d.innerHTML = `<div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:50px">${_escHtml(s.title)}</div>
+      <div style="opacity:.5;font-size:10px;margin-top:2px">${_escHtml(s.tool_id)} · ${s.turn_count} turns · ${dateStr}</div>
+      <button onclick="event.stopPropagation();exportConversation('${s.id}','${s.title.replace(/'/g,"\\'")}')"
+        style="position:absolute;top:8px;right:8px;background:#1c2540;border:1px solid #2a4070;color:#64ffda;border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:600">📥</button>`;
+    d.onmouseover = () => d.style.borderColor = '#2a4070';
     d.onmouseout  = () => d.style.borderColor = 'transparent';
     d.onclick = () => restoreSession(s.id, s.title);
     list.appendChild(d);
   });
 }
 
-searchHistory._t = null;
 function searchHistory(q) {
   clearTimeout(searchHistory._t);
   searchHistory._t = setTimeout(() => loadHistory(q || undefined), 300);
 }
 
-async function restoreSession(id, title) {
-  const turns = await fetch(`/history/${id}`).then(r => r.json()).catch(() => []);
-  const msgs = document.getElementById('messages');
-  if (!msgs) return;
-  msgs.innerHTML = `<div style="text-align:center;opacity:.4;font-size:11px;padding:8px">📂 Restored: ${_escHtml(title)}</div>`;
-  turns.forEach(t => addMsg(t.role === 'user' ? 'user' : 'assistant', t.content));
-  closeHistory();
+// ── Tool call progress display ────────────────────────────────────────────────
+async function poll(job_id) {
+  let lastProgressLen = 0;
+  for (;;) {
+    await new Promise(r => setTimeout(r, 600));
+    const j = await (await fetch('/poll/' + job_id)).json();
+    // Update thinking message with progress
+    const progress = j.progress || [];
+    if (progress.length > lastProgressLen) {
+      const latest = progress[progress.length - 1];
+      const el = document.getElementById('thinking-msg');
+      if (el && latest.tools) {
+        el.innerHTML = `<div class="spinner"></div> <span>Calling: <b>${latest.tools.join(', ')}</b> (step ${latest.iteration||'?'})</span>`;
+      }
+      lastProgressLen = progress.length;
+    }
+    if (j.status === 'done') {
+      removeThinking();
+      addMsg('assistant', j.response);
+      if (j.warnings && j.warnings.length) {
+        const chat = document.getElementById('chat');
+        j.warnings.forEach(w => {
+          const d = document.createElement('div'); d.className='mwarn'; d.textContent=w; chat.appendChild(d);
+        });
+        chat.scrollTop = chat.scrollHeight;
+      }
+      setStatus('ready'); return;
+    }
+    if (j.status === 'error') {removeThinking(); addMsg('error', j.response); setStatus('error'); return;}
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -1502,7 +1686,8 @@ async function init() {
   buildNav();
   switchTool('home');
   loadGuardrails();
-  startSSE();
+  startSSEWithNotifs();
+  requestNotifPermission();
   pollPublicUrl();
   initModelBtn();
   const conns = await loadConns();
@@ -1510,7 +1695,7 @@ async function init() {
   const miss  = conns.filter(c=>!c.ok).map(c=>c.name);
   let msg = `👋 Hi Sai! I'm your Work Assistant.\n\n**Connected:** ${ok}`;
   if (miss.length) msg += `\n\n⚠️ **Not configured:** ${miss.join(', ')} — add keys to .env`;
-  msg += `\n\nSelect a tool from the left sidebar, or just type anything below.`;
+  msg += `\n\nSelect a tool from the left sidebar, or just type anything below.\n\n💡 **Shortcuts:** ⌘+Enter send · ⌘+K focus input · ⌘+/ model picker · Esc close panels`;
   addMsg('assistant', msg);
 }
 init();
@@ -1546,17 +1731,24 @@ def chat():
 
     job_id = str(uuid.uuid4())
     with _lock:
-        _jobs[job_id] = {"status": "thinking", "response": None, "warnings": []}
+        _jobs[job_id] = {"status": "thinking", "response": None, "warnings": [], "progress": []}
         history = list(_histories.get(tool_id, []))   # per-tool history, copy
 
     # Use a stable session ID: tool_id + date, so each tool gets a daily session
     import datetime as _dt
     session_id = f"{tool_id}_{_dt.date.today().isoformat()}"
 
+    def progress_cb(event):
+        with _lock:
+            if job_id in _jobs:
+                _jobs[job_id].setdefault("progress", []).append(event)
+
     def run():
         try:
             from agent import run_agent_turn
-            response, updated, warnings = run_agent_turn(history, message, auto_confirm=True)
+            response, updated, warnings = run_agent_turn(
+                history, message, auto_confirm=True, progress_callback=progress_cb
+            )
             with _lock:
                 _histories[tool_id] = updated
             # Persist to conversation history store
@@ -2016,12 +2208,16 @@ input:checked+.toggle-slider:before{transform:translateX(14px);background:#50fa7
 """
 
 _PAGE_NAV = """
-<div style="background:#1a1c24;border-bottom:1px solid #252836;padding:10px 24px;display:flex;align-items:center;gap:16px">
+<div style="background:#1a1c24;border-bottom:1px solid #252836;padding:10px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
   <a href="/" style="font-size:13px;font-weight:700;color:#64ffda;text-decoration:none">⚡ Work Assistant</a>
   <span style="color:#252836">|</span>
-  <a href="/actions-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">✅ Action Items</a>
+  <a href="/actions-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">✅ Actions</a>
   <a href="/triggers-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">⚡ Automation</a>
   <a href="/memory-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">🧠 Memory</a>
+  <a href="/scheduler-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">🕐 Scheduler</a>
+  <a href="/search-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">🔍 Search</a>
+  <a href="/inbox-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">📧 Inbox</a>
+  <a href="/calendar-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">📅 Calendar</a>
 </div>
 """
 
@@ -2675,6 +2871,833 @@ def _start_tunnel():
 @app.route("/public-url")
 def public_url():
     return jsonify({"url": _PUBLIC_URL})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW FEATURE ROUTES
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Action item dependencies ──────────────────────────────────────────────────
+
+@app.route("/action-items/depends", methods=["POST"])
+def action_items_depends():
+    try:
+        from tools.action_items import set_depends_on
+        data = request.get_json(force=True) or {}
+        item_id = int(data["id"])
+        depends_on = list(data.get("depends_on", []))
+        return jsonify(set_depends_on(item_id, depends_on))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ── Conversation export ───────────────────────────────────────────────────────
+
+@app.route("/export/<session_id>")
+def export_conversation(session_id):
+    if not _CONV_STORE:
+        return "No conversation store available", 404
+    turns = _cs_get_turns(session_id)
+    sessions = _cs_list_sessions()
+    session_meta = next((s for s in sessions if s["id"] == session_id), {})
+    title = session_meta.get("title", session_id)
+    lines = [f"# {title}", "", f"*Exported from Work Assistant — {session_id}*", ""]
+    for t in turns:
+        role = "**You**" if t["role"] == "user" else "**Assistant**"
+        ts = t.get("ts", "")[:19].replace("T", " ")
+        lines.append(f"### {role}  _{ts}_")
+        lines.append("")
+        lines.append(t.get("content", ""))
+        lines.append("")
+    md = "\n".join(lines)
+    from flask import Response
+    return Response(
+        md,
+        mimetype="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{session_id}.md"'},
+    )
+
+
+# ── Send draft email ──────────────────────────────────────────────────────────
+
+@app.route("/send-draft", methods=["POST"])
+def send_draft():
+    data = request.get_json(force=True) or {}
+    draft = data.get("draft", "").strip()
+    email_context = data.get("email_context", "")
+    if not draft:
+        return jsonify({"ok": False, "error": "No draft provided"}), 400
+    try:
+        # Try to send via M365 if configured
+        from tools.ms365 import send_email
+        # Extract a recipient from context if available (basic heuristic)
+        import re as _re
+        emails = _re.findall(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b',
+                              email_context)
+        if not emails:
+            return jsonify({"ok": False, "error": "No recipient found in email context. Copy the draft manually."}), 400
+        result = send_email(to=emails[0], subject="Re: (Work Assistant draft)", body=draft)
+        return jsonify({"ok": True, "result": str(result)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── Global smart search ───────────────────────────────────────────────────────
+
+@app.route("/search")
+def global_search():
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"results": [], "error": "empty query"})
+    results = []
+    import concurrent.futures as _cf
+
+    def search_memory(q):
+        try:
+            from tools.memory import load_memory
+            mem = load_memory()
+            hits = []
+            for cat, items in mem.items():
+                if not isinstance(items, dict):
+                    continue
+                for k, v in items.items():
+                    text = f"{k} {v}".lower()
+                    if q.lower() in text:
+                        hits.append({"source": "memory", "category": cat, "key": k,
+                                     "snippet": f"{k}: {str(v)[:200]}"})
+            return hits
+        except Exception:
+            return []
+
+    def search_actions(q):
+        try:
+            from tools.action_items import get_my_action_items
+            items = get_my_action_items(status="all", max_count=100)
+            return [{"source": "actions", "id": i["id"], "snippet": i["task"],
+                     "priority": i["priority"], "status": i["status"]}
+                    for i in items if q.lower() in i["task"].lower()]
+        except Exception:
+            return []
+
+    def search_history_items(q):
+        try:
+            sessions = _cs_search_sessions(q) if _CONV_STORE else []
+            return [{"source": "history", "id": s["id"], "snippet": s["title"],
+                     "tool_id": s.get("tool_id", "")} for s in sessions]
+        except Exception:
+            return []
+
+    def search_kb(q):
+        try:
+            from tools.rag import search_knowledge_base
+            hits = search_knowledge_base(q, max_results=5)
+            return [{"source": "knowledge_base", "snippet": h.get("text", "")[:200],
+                     "doc": h.get("source", "")} for h in hits]
+        except Exception:
+            return []
+
+    with _cf.ThreadPoolExecutor(max_workers=4) as pool:
+        futs = [pool.submit(fn, q) for fn in [search_memory, search_actions,
+                                                search_history_items, search_kb]]
+        for f in _cf.as_completed(futs):
+            results.extend(f.result())
+
+    return jsonify({"results": results, "query": q})
+
+
+@app.route("/search-page")
+def search_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Search — Work Assistant</title>
+{_PAGE_STYLE}
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">🔍 Global Search</div>
+      <div class="page-subtitle">Search across memory, action items, conversation history, and knowledge base</div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;margin-bottom:24px">
+    <input id="search-input" class="form-input" placeholder="Search everything…" autofocus
+      style="flex:1;padding:12px 16px;font-size:14px"
+      onkeydown="if(event.key==='Enter')doSearch()">
+    <button class="btn btn-primary" onclick="doSearch()" style="padding:12px 24px;font-size:14px">Search</button>
+  </div>
+
+  <div id="search-results" style="display:none">
+    <div id="results-count" style="font-size:12px;color:#6b7394;margin-bottom:16px"></div>
+    <div id="results-memory" class="mem-section" style="display:none">
+      <div class="mem-section-hdr">🧠 MEMORY</div>
+      <div id="results-memory-items"></div>
+    </div>
+    <div id="results-actions" class="mem-section" style="display:none">
+      <div class="mem-section-hdr">✅ ACTION ITEMS</div>
+      <div id="results-actions-items"></div>
+    </div>
+    <div id="results-history" class="mem-section" style="display:none">
+      <div class="mem-section-hdr">🕐 CONVERSATIONS</div>
+      <div id="results-history-items"></div>
+    </div>
+    <div id="results-kb" class="mem-section" style="display:none">
+      <div class="mem-section-hdr">📚 KNOWLEDGE BASE</div>
+      <div id="results-kb-items"></div>
+    </div>
+  </div>
+  <div id="search-empty" class="empty-state" style="display:none">
+    <div class="empty-state-icon">🔍</div>
+    <div class="empty-state-txt" id="search-empty-txt">No results found.</div>
+  </div>
+</div>
+
+<script>
+function _esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+
+async function doSearch() {{
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('search-empty').style.display='none';
+  document.getElementById('results-count').textContent='Searching…';
+  document.getElementById('search-results').style.display='block';
+  try {{
+    const d = await fetch('/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    const res = d.results || [];
+    if (!res.length) {{
+      document.getElementById('search-results').style.display='none';
+      document.getElementById('search-empty').style.display='block';
+      document.getElementById('search-empty-txt').textContent='No results for "'+_esc(q)+'"';
+      return;
+    }}
+    document.getElementById('results-count').textContent=res.length+' result(s) for "'+_esc(q)+'"';
+    const groups = {{}};
+    res.forEach(r => {{ (groups[r.source]||=(groups[r.source]=[])).push(r); }});
+
+    const showSection = (id, items, renderFn) => {{
+      const sec = document.getElementById('results-'+id);
+      const inner = document.getElementById('results-'+id+'-items');
+      if (items && items.length) {{
+        sec.style.display='';
+        inner.innerHTML = items.map(renderFn).join('');
+      }} else {{
+        sec.style.display='none';
+      }}
+    }};
+
+    showSection('memory', groups['memory'], r =>
+      `<div class="mem-row"><span class="mem-key">${{_esc(r.category)}} / ${{_esc(r.key)}}</span><span class="mem-val">${{_esc(r.snippet)}}</span></div>`);
+
+    showSection('actions', groups['actions'], r =>
+      `<div class="mem-row"><span class="badge badge-${{r.priority||'medium'}}" style="min-width:50px;margin-top:1px">${{_esc(r.priority||'medium')}}</span><span class="mem-val">${{_esc(r.snippet)}}</span></div>`);
+
+    showSection('history', groups['history'], r =>
+      `<div class="mem-row"><span class="mem-key">${{_esc(r.tool_id)}}</span><span class="mem-val"><a href="/" style="color:#64ffda">${{_esc(r.snippet)}}</a></span></div>`);
+
+    showSection('kb', groups['knowledge_base'], r =>
+      `<div class="mem-row"><span class="mem-key">${{_esc(r.doc||'doc')}}</span><span class="mem-val">${{_esc(r.snippet)}}</span></div>`);
+
+  }} catch(e) {{
+    document.getElementById('results-count').textContent='Error: '+e.message;
+  }}
+}}
+
+document.addEventListener('DOMContentLoaded', () => {{
+  document.getElementById('search-input').focus();
+  const params = new URLSearchParams(location.search);
+  const q = params.get('q');
+  if (q) {{ document.getElementById('search-input').value=q; doSearch(); }}
+}});
+</script>
+</body></html>"""
+    return html
+
+
+# ── Meeting prep ──────────────────────────────────────────────────────────────
+
+@app.route("/meeting-prep", methods=["POST"])
+def meeting_prep():
+    data = request.get_json(force=True) or {}
+    title = data.get("title", "").strip()
+    attendees = data.get("attendees", [])  # list of names or emails
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    result = {"title": title, "attendees": [], "action_items": [], "memory": {}}
+    # 1. Look up each attendee in memory
+    try:
+        from tools.memory import load_memory
+        mem = load_memory()
+        people = mem.get("people", {})
+        for att in attendees:
+            att_lower = att.lower()
+            match = next((v for k, v in people.items() if att_lower in k.lower()), None)
+            result["attendees"].append({"name": att, "info": match or {}})
+        result["memory"] = {
+            "context": mem.get("context", {}),
+            "relevant_people": {k: v for k, v in people.items()
+                                if any(a.lower() in k.lower() for a in attendees)},
+        }
+    except Exception:
+        pass
+    # 2. Related action items
+    try:
+        from tools.action_items import get_my_action_items
+        items = get_my_action_items(status="open", max_count=20)
+        related = [i for i in items if any(
+            a.lower() in i["task"].lower() or a.lower() in i["owner"].lower()
+            for a in ([title] + attendees)
+        )]
+        result["action_items"] = related
+    except Exception:
+        pass
+    return jsonify(result)
+
+
+@app.route("/meeting-prep-page")
+def meeting_prep_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meeting Prep — Work Assistant</title>
+{_PAGE_STYLE}
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">📅 Meeting Prep</div>
+      <div class="page-subtitle">Auto-pull context, attendee info and action items before your meeting</div>
+    </div>
+  </div>
+
+  <div style="background:#1e2028;border:1px solid #252836;border-radius:8px;padding:20px;margin-bottom:24px">
+    <div class="form-group">
+      <label class="form-label">Meeting title *</label>
+      <input class="form-input" id="meet-title" placeholder="e.g. Q2 Sprint Review">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Attendees (names or emails, comma-separated)</label>
+      <input class="form-input" id="meet-attendees" placeholder="e.g. Ahmed, sarah@company.com, John">
+    </div>
+    <button class="btn btn-primary" onclick="prepMeeting()" style="margin-top:4px">Prepare Briefing →</button>
+  </div>
+
+  <div id="prep-result" style="display:none"></div>
+</div>
+
+<script>
+function _esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+
+async function prepMeeting() {{
+  const title = document.getElementById('meet-title').value.trim();
+  const att = document.getElementById('meet-attendees').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if (!title) {{document.getElementById('meet-title').focus();return;}}
+  const res = document.getElementById('prep-result');
+  res.style.display='block';
+  res.innerHTML='<div class="empty-state"><div class="empty-state-icon">⏳</div><div class="empty-state-txt">Preparing briefing…</div></div>';
+  try {{
+    const d = await fetch('/meeting-prep',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{title,attendees:att}})}}).then(r=>r.json());
+    let html='';
+    // Action items
+    if (d.action_items && d.action_items.length) {{
+      html+='<div class="mem-section"><div class="mem-section-hdr">✅ RELATED ACTION ITEMS</div>';
+      d.action_items.forEach(i=>{{
+        html+=`<div class="mem-row"><span class="badge badge-${{_esc(i.priority)}}" style="min-width:50px;margin-top:1px">${{_esc(i.priority)}}</span><span class="mem-val">${{_esc(i.task)}}</span></div>`;
+      }});
+      html+='</div>';
+    }}
+    // Attendees
+    if (d.attendees && d.attendees.length) {{
+      html+='<div class="mem-section"><div class="mem-section-hdr">👥 ATTENDEES</div>';
+      d.attendees.forEach(a=>{{
+        const info=a.info||{{}};
+        html+=`<div class="mem-row"><span class="mem-key">${{_esc(a.name)}}</span><span class="mem-val">${{info.role?'Role: '+_esc(info.role):''}}</span></div>`;
+      }});
+      html+='</div>';
+    }}
+    // Work context
+    const ctx=d.memory&&d.memory.context||{{}};
+    if (Object.keys(ctx).length) {{
+      html+='<div class="mem-section"><div class="mem-section-hdr">📌 WORK CONTEXT</div>';
+      Object.entries(ctx).forEach(([k,v])=>{{
+        html+=`<div class="mem-row"><span class="mem-key">${{_esc(k)}}</span><span class="mem-val">${{_esc(String(v))}}</span></div>`;
+      }});
+      html+='</div>';
+    }}
+    if (!html) html='<div class="empty-state"><div class="empty-state-icon">ℹ️</div><div class="empty-state-txt">No relevant context found yet. Add memory facts and action items to get a richer briefing.</div></div>';
+    res.innerHTML=html;
+  }} catch(e) {{
+    res.innerHTML='<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-txt">Error: '+_esc(e.message)+'</div></div>';
+  }}
+}}
+</script>
+</body></html>"""
+    return html
+
+
+# ── Scheduler routes ──────────────────────────────────────────────────────────
+
+@app.route("/scheduler")
+def scheduler_list():
+    try:
+        from tools.scheduler import list_tasks, get_next_run
+        tasks = list_tasks()
+        for t in tasks:
+            t["next_run"] = get_next_run(t["id"])
+        return jsonify({"tasks": tasks})
+    except Exception as e:
+        return jsonify({"tasks": [], "error": str(e)})
+
+
+@app.route("/scheduler", methods=["POST"])
+def scheduler_add():
+    data = request.get_json(force=True) or {}
+    try:
+        from tools.scheduler import add_task
+        task = add_task(
+            name=data["name"],
+            cron_expr=data["cron_expr"],
+            query=data["query"],
+            tool_id=data.get("tool_id", "home"),
+        )
+        return jsonify(task)
+    except KeyError as e:
+        return jsonify({"error": f"Missing field: {e}"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/scheduler/<int:task_id>", methods=["DELETE"])
+def scheduler_delete(task_id):
+    try:
+        from tools.scheduler import delete_task
+        return jsonify(delete_task(task_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/scheduler/toggle/<int:task_id>", methods=["POST"])
+def scheduler_toggle(task_id):
+    try:
+        from tools.scheduler import toggle_task
+        data = request.get_json(force=True) or {}
+        enabled = bool(data.get("enabled", True))
+        return jsonify(toggle_task(task_id, enabled))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/scheduler-page")
+def scheduler_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scheduler — Work Assistant</title>
+{_PAGE_STYLE}
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">🕐 Scheduled Tasks</div>
+      <div class="page-subtitle">Recurring agent queries that run automatically on a cron schedule</div>
+    </div>
+    <button class="btn btn-primary" onclick="openAddModal()">＋ Add Task</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Name</th><th>Schedule</th><th>Query</th><th>Runs</th><th>Last run</th><th>Next run</th><th>Enabled</th><th></th>
+      </tr></thead>
+      <tbody id="tasks-body"><tr><td colspan="8" style="text-align:center;color:#6b7394;padding:24px">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:16px;background:#1e2028;border:1px solid #252836;border-radius:6px;padding:14px">
+    <div style="font-size:11px;font-weight:700;color:#8892b0;margin-bottom:8px">📖 CRON EXAMPLES</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;color:#6b7394">
+      <div><code style="color:#64ffda">0 8 * * *</code> — Every day at 08:00</div>
+      <div><code style="color:#64ffda">0 9 * * 1</code> — Every Monday at 09:00</div>
+      <div><code style="color:#64ffda">*/30 * * * *</code> — Every 30 minutes</div>
+      <div><code style="color:#64ffda">0 0 * * *</code> — Midnight every day</div>
+      <div><code style="color:#64ffda">0 8 * * 1-5</code> — Weekdays at 08:00</div>
+      <div><code style="color:#64ffda">0 17 * * 5</code> — Fridays at 17:00</div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Task Modal -->
+<div class="modal-overlay" id="add-modal" onclick="if(event.target===this)closeAddModal()">
+  <div class="modal-box">
+    <div class="modal-title">🕐 Add Scheduled Task</div>
+    <div class="form-group">
+      <label class="form-label">Name *</label>
+      <input class="form-input" id="add-name" placeholder="e.g. Daily briefing" autofocus>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Cron expression *</label>
+      <input class="form-input" id="add-cron" placeholder="e.g. 0 8 * * *">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Query (what the agent will run) *</label>
+      <textarea class="form-textarea" id="add-query" placeholder="e.g. Give me my daily briefing including emails and calendar"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Tool context</label>
+      <select class="form-select" id="add-tool">
+        <option value="home">Home</option>
+        <option value="outlook">Outlook</option>
+        <option value="github">GitHub</option>
+        <option value="jira">Jira</option>
+        <option value="slack">Slack</option>
+        <option value="actions">Action Items</option>
+      </select>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn" style="background:#252836;color:#8892b0" onclick="closeAddModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAdd()">Add Task</button>
+    </div>
+    <div id="add-msg" style="font-size:11px;color:#ff5555;margin-top:8px"></div>
+  </div>
+</div>
+
+<script>
+function _esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+let _tasks=[];
+
+async function loadTasks(){{
+  try{{
+    const d=await fetch('/scheduler').then(r=>r.json());
+    _tasks=d.tasks||[];
+    renderTasks();
+  }}catch(e){{
+    document.getElementById('tasks-body').innerHTML='<tr><td colspan="8" style="color:#ff5555;text-align:center;padding:16px">Error: '+_esc(e.message)+'</td></tr>';
+  }}
+}}
+
+function renderTasks(){{
+  const body=document.getElementById('tasks-body');
+  if(!_tasks.length){{
+    body.innerHTML='<tr><td colspan="8" style="text-align:center;color:#6b7394;padding:32px">No tasks yet. Click ＋ Add Task to get started.</td></tr>';
+    return;
+  }}
+  body.innerHTML=_tasks.map(t=>`
+    <tr id="row-${{t.id}}">
+      <td style="font-weight:600;color:#d4d8e8">${{_esc(t.name)}}</td>
+      <td><code style="color:#64ffda;font-size:11px">${{_esc(t.cron_expr)}}</code></td>
+      <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${{_esc(t.query)}}">${{_esc(t.query.slice(0,60))}}</td>
+      <td style="color:#6b7394">${{t.run_count||0}}</td>
+      <td style="color:#6b7394;font-size:11px">${{t.last_run?t.last_run.slice(0,16).replace('T',' '):'Never'}}</td>
+      <td style="color:#6b7394;font-size:11px">${{t.next_run?t.next_run.slice(0,16).replace('T',' '):'—'}}</td>
+      <td>
+        <label class="toggle-sw"><input type="checkbox" ${{t.enabled?'checked':''}} onchange="toggleTask(${{t.id}},this.checked)"><span class="toggle-slider"></span></label>
+      </td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteTask(${{t.id}})">✕</button></td>
+    </tr>`).join('');
+}}
+
+async function toggleTask(id,enabled){{
+  await fetch('/scheduler/toggle/'+id,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{enabled}})}});
+  loadTasks();
+}}
+
+async function deleteTask(id){{
+  if(!confirm('Delete this scheduled task?')) return;
+  await fetch('/scheduler/'+id,{{method:'DELETE'}});
+  _tasks=_tasks.filter(t=>t.id!==id);
+  renderTasks();
+}}
+
+function openAddModal(){{document.getElementById('add-modal').classList.add('open');document.getElementById('add-name').focus();}}
+function closeAddModal(){{document.getElementById('add-modal').classList.remove('open');['add-name','add-cron','add-query'].forEach(id=>document.getElementById(id).value='');document.getElementById('add-msg').textContent='';}}
+
+async function submitAdd(){{
+  const name=document.getElementById('add-name').value.trim();
+  const cron=document.getElementById('add-cron').value.trim();
+  const query=document.getElementById('add-query').value.trim();
+  const tool=document.getElementById('add-tool').value;
+  const msg=document.getElementById('add-msg');
+  if(!name||!cron||!query){{msg.textContent='All starred fields are required.';return;}}
+  try{{
+    const d=await fetch('/scheduler',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{name,cron_expr:cron,query,tool_id:tool}})}}).then(r=>r.json());
+    if(d.error){{msg.textContent='❌ '+d.error;return;}}
+    closeAddModal();
+    loadTasks();
+  }}catch(e){{msg.textContent='Error: '+e.message;}}
+}}
+
+document.addEventListener('DOMContentLoaded',()=>{{loadTasks();setInterval(loadTasks,30000);}});
+</script>
+</body></html>"""
+    return html
+
+
+# ── Email inbox page ──────────────────────────────────────────────────────────
+
+@app.route("/inbox-page")
+def inbox_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Email Inbox — Work Assistant</title>
+{_PAGE_STYLE}
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">📧 Email Inbox</div>
+      <div class="page-subtitle">Your recent emails — click to reply with a tone-matched draft</div>
+    </div>
+    <button class="btn btn-success" onclick="refreshInbox()">↻ Refresh</button>
+  </div>
+
+  <div id="inbox-list"><div class="empty-state"><div class="empty-state-icon">⏳</div><div class="empty-state-txt">Loading emails…</div></div></div>
+</div>
+
+<!-- Draft modal injected by JS -->
+<script>
+function _esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+
+// Draft approval modal (inline, no external dependency)
+function _injectDraftModal(){{
+  if(document.getElementById('draft-modal')) return;
+  const el=document.createElement('div');
+  el.className='modal-overlay';el.id='draft-modal';
+  el.onclick=e=>{{if(e.target===el)closeDraftModal();}};
+  el.innerHTML=`
+    <div style="background:#1a1c24;border:1px solid #2a2d3e;border-radius:10px;width:520px;max-width:96vw;padding:22px 24px;box-shadow:0 24px 64px rgba(0,0,0,.6);max-height:90vh;overflow-y:auto">
+      <div style="font-size:14px;font-weight:700;color:#d4d8e8;margin-bottom:12px">✍️ Draft Reply</div>
+      <label style="font-size:11px;color:#8892b0;display:block;margin-bottom:5px">Edit before sending:</label>
+      <textarea id="draft-edit" rows="8" style="width:100%;background:#12141a;border:1px solid #2a2d3e;border-radius:5px;color:#d4d8e8;font-size:12.5px;padding:10px;outline:none;resize:vertical;font-family:inherit;line-height:1.6"></textarea>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button onclick="closeDraftModal()" style="background:#252836;color:#8892b0;border:none;border-radius:5px;padding:8px 16px;cursor:pointer;font-size:12px">Cancel</button>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('draft-edit').value);document.getElementById('draft-copy-msg').textContent='✅ Copied!';" style="background:#1c2540;color:#64ffda;border:1px solid #2a4070;border-radius:5px;padding:8px 16px;cursor:pointer;font-size:12px;font-weight:600">📋 Copy</button>
+      </div>
+      <div id="draft-copy-msg" style="font-size:11px;color:#50fa7b;margin-top:8px;text-align:right"></div>
+    </div>`;
+  document.body.appendChild(el);
+}}
+function closeDraftModal(){{document.getElementById('draft-modal')?.classList.remove('open');}}
+
+async function openDraftFor(emailBody){{
+  _injectDraftModal();
+  const modal=document.getElementById('draft-modal');
+  const edit=document.getElementById('draft-edit');
+  edit.value='Generating draft…';
+  document.getElementById('draft-copy-msg').textContent='';
+  modal.classList.add('open');
+  try{{
+    const r=await fetch('/draft-reply',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email_body:emailBody}})}});
+    const d=await r.json();
+    edit.value=d.draft||d.error||'(empty)';
+  }}catch(e){{edit.value='Error: '+e.message;}}
+}}
+
+let _emails=[];
+
+async function refreshInbox(){{
+  document.getElementById('inbox-list').innerHTML='<div class="empty-state"><div class="empty-state-icon">⏳</div><div class="empty-state-txt">Loading emails…</div></div>';
+  try{{
+    // Call the agent to fetch emails
+    const r=await fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{message:'List my 10 most recent unread emails with sender, subject, date, and a 2-sentence summary. Return as JSON array with fields: sender, subject, date, summary, body_preview.',tool_id:'outlook'}})}}).then(r=>r.json());
+    if(r.error)throw new Error(r.error);
+    // Poll for result
+    let tries=0;
+    const poll=async()=>{{
+      const j=await fetch('/poll/'+r.job_id).then(r=>r.json());
+      if(j.status==='done'){{
+        renderEmailsFromText(j.response);
+        return;
+      }}
+      if(j.status==='error'){{
+        document.getElementById('inbox-list').innerHTML='<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-txt">'+_esc(j.response)+'</div></div>';
+        return;
+      }}
+      if(++tries<60)setTimeout(poll,1000);
+    }};
+    setTimeout(poll,1000);
+  }}catch(e){{
+    document.getElementById('inbox-list').innerHTML='<div class="empty-state"><div class="empty-state-icon">📧</div><div class="empty-state-txt">Connect Outlook in .env to load emails.<br><small style="color:#3a4060">M365 credentials required</small></div></div>';
+  }}
+}}
+
+function renderEmailsFromText(text){{
+  // Try to parse JSON from agent response
+  const el=document.getElementById('inbox-list');
+  try{{
+    const match=text.match(/\[[\s\S]+\]/);
+    if(match){{
+      const emails=JSON.parse(match[0]);
+      _emails=emails;
+      el.innerHTML=emails.map((e,i)=>`
+        <div class="card">
+          <div class="card-row">
+            <div class="card-body">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+                <div style="font-weight:600;color:#d4d8e8;font-size:13px">${{_esc(e.subject||'(no subject)')}}</div>
+                <div style="font-size:10px;color:#6b7394;white-space:nowrap;margin-left:12px">${{_esc(e.date||'')}}</div>
+              </div>
+              <div style="font-size:11px;color:#8892b0;margin-bottom:8px">From: ${{_esc(e.sender||'')}}</div>
+              <div style="font-size:12px;color:#a8b0c8;line-height:1.5">${{_esc(e.summary||e.body_preview||'')}}</div>
+            </div>
+            <div class="card-actions" style="margin-left:12px">
+              <button class="btn btn-success btn-sm" onclick="openDraftFor(_emails[${{i}}].body_preview||_emails[${{i}}].summary||'')">✍️ Reply</button>
+            </div>
+          </div>
+        </div>`).join('');
+      return;
+    }}
+  }}catch(e){{}}
+  // Fallback: show raw text
+  el.innerHTML=`<div class="card"><div class="card-body"><div class="mbody" style="white-space:pre-wrap;font-size:12px;color:#d4d8e8">${{_esc(text)}}</div></div></div>`;
+}}
+
+document.addEventListener('DOMContentLoaded',refreshInbox);
+</script>
+</body></html>"""
+    return html
+
+
+# ── Calendar week view page ───────────────────────────────────────────────────
+
+@app.route("/calendar-page")
+def calendar_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Calendar — Work Assistant</title>
+{_PAGE_STYLE}
+<style>
+.cal-grid{{display:grid;grid-template-columns:60px repeat(7,1fr);gap:0;border:1px solid #252836;border-radius:8px;overflow:hidden}}
+.cal-head{{background:#1a1c24;padding:10px 6px;text-align:center;font-size:11px;font-weight:700;color:#8892b0;border-bottom:1px solid #252836}}
+.cal-head.today{{color:#64ffda;background:#1c2540}}
+.cal-time{{background:#1a1c24;padding:4px 6px;text-align:right;font-size:10px;color:#3a4060;border-bottom:1px solid #1e2028;border-right:1px solid #252836}}
+.cal-cell{{border-bottom:1px solid #1e2028;border-right:1px solid #252836;min-height:40px;padding:2px;position:relative}}
+.cal-cell:last-child{{border-right:none}}
+.cal-event{{background:#1c2540;border-left:3px solid #64ffda;border-radius:3px;padding:3px 5px;font-size:10px;color:#d4d8e8;margin-bottom:2px;cursor:default;line-height:1.3}}
+.cal-event:hover{{background:#22304a}}
+</style>
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">📅 Calendar</div>
+      <div class="page-subtitle" id="week-label">This week</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836" onclick="changeWeek(-1)">← Prev</button>
+      <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836" onclick="changeWeek(0)">Today</button>
+      <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836" onclick="changeWeek(1)">Next →</button>
+      <button class="btn btn-success" onclick="refreshCalendar()">↻ Load</button>
+    </div>
+  </div>
+
+  <div id="cal-wrap">
+    <div class="empty-state"><div class="empty-state-icon">⏳</div><div class="empty-state-txt">Loading calendar…</div></div>
+  </div>
+</div>
+
+<script>
+function _esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+
+let _weekOffset=0;
+let _events=[];
+
+function getWeekDates(offset){{
+  const now=new Date();
+  const monday=new Date(now);
+  const dow=now.getDay()||7;
+  monday.setDate(now.getDate()-dow+1+(offset*7));
+  return Array.from({{length:7}},(_,i)=>{{
+    const d=new Date(monday);d.setDate(monday.getDate()+i);return d;
+  }});
+}}
+
+const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const HOURS=Array.from({{length:16}},(_,i)=>i+7); // 7am-10pm
+
+function renderCalendar(days,events){{
+  const today=new Date().toDateString();
+  const first=days[0];
+  const last=days[6];
+  const fmt=d=>`${{d.getMonth()+1}}/${{d.getDate()}}`;
+  document.getElementById('week-label').textContent=`${{fmt(first)}} – ${{fmt(last)}}`;
+
+  let grid=`<div class="cal-grid">`;
+  // Headers
+  grid+=`<div class="cal-head"></div>`;
+  days.forEach((d,i)=>{{
+    const isTd=d.toDateString()===today;
+    grid+=`<div class="cal-head${{isTd?' today':''}}">${{DAYS[i]}}<br><span style="font-size:13px">${{d.getDate()}}</span></div>`;
+  }});
+  // Hour rows
+  HOURS.forEach(h=>{{
+    grid+=`<div class="cal-time">${{h}}:00</div>`;
+    days.forEach(d=>{{
+      const ds=d.toISOString().slice(0,10);
+      const dayEvts=events.filter(e=>{{
+        if(!e.start)return false;
+        const eDate=e.start.slice(0,10);
+        const eHour=parseInt(e.start.slice(11,13)||'0');
+        return eDate===ds&&eHour===h;
+      }});
+      grid+=`<div class="cal-cell">${{dayEvts.map(e=>`<div class="cal-event" title="${{_esc(e.subject||'')}} — ${{_esc(e.organizer||'')}}">${{_esc((e.subject||'Event').slice(0,25))}}</div>`).join('')}}</div>`;
+    }});
+  }});
+  grid+='</div>';
+  document.getElementById('cal-wrap').innerHTML=grid;
+}}
+
+function changeWeek(delta){{
+  _weekOffset=delta===0?0:_weekOffset+delta;
+  renderCalendar(getWeekDates(_weekOffset),_events);
+  if(delta===0||_events.length===0)refreshCalendar();
+}}
+
+async function refreshCalendar(){{
+  const days=getWeekDates(_weekOffset);
+  renderCalendar(days,[]);
+  try{{
+    const r=await fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{message:'List all my calendar events for this week. Return JSON array with fields: subject, start (ISO datetime), end (ISO datetime), organizer.',tool_id:'outlook'}})}}).then(r=>r.json());
+    if(r.error)throw new Error(r.error);
+    let tries=0;
+    const poll=async()=>{{
+      const j=await fetch('/poll/'+r.job_id).then(r=>r.json());
+      if(j.status==='done'){{
+        try{{
+          const match=j.response.match(/\[[\s\S]+?\]/);
+          if(match){{_events=JSON.parse(match[0]);renderCalendar(getWeekDates(_weekOffset),_events);return;}}
+        }}catch(e){{}}
+        document.getElementById('cal-wrap').innerHTML='<div class="card"><div class="card-body"><div style="white-space:pre-wrap;font-size:12px;color:#d4d8e8">'+_esc(j.response)+'</div></div></div>';
+        return;
+      }}
+      if(j.status==='error'){{document.getElementById('cal-wrap').innerHTML='<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-txt">'+_esc(j.response)+'</div></div>';return;}}
+      if(++tries<60)setTimeout(poll,1000);
+    }};
+    setTimeout(poll,1000);
+  }}catch(e){{
+    document.getElementById('cal-wrap').innerHTML='<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-txt">Connect Outlook to load calendar events.<br><small style="color:#3a4060">M365 credentials required</small></div></div>';
+  }}
+}}
+
+document.addEventListener('DOMContentLoaded',()=>{{
+  renderCalendar(getWeekDates(0),[]);
+  refreshCalendar();
+}});
+</script>
+</body></html>"""
+    return html
 
 
 # ══════════════════════════════════════════════════════════════════════════════
