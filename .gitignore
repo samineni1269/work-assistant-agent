@@ -62,3 +62,4 @@ knowledge_base/
 corrections.json
 self_learning.json
 self_learning.tmp
+seen_ingested.json

@@ -77,3 +77,23 @@ def test_query_clustering(tmp_path):
         clusters = mod.get_query_clusters()
         assert len(clusters) >= 1
         assert clusters[0]["count"] >= 3
+
+def test_auto_ingest_deduplication(tmp_path):
+    import tools.auto_ingest as mod
+    from unittest.mock import patch
+    with patch.object(mod, "SEEN_FILE", tmp_path / "seen.json"):
+        assert mod._already_seen("abc123") is False
+        mod._mark_seen("abc123")
+        assert mod._already_seen("abc123") is True
+        # Marking again should not duplicate
+        mod._mark_seen("abc123")
+        seen = json.loads((tmp_path / "seen.json").read_text())
+        assert seen.count("abc123") == 1
+
+def test_tone_snippet_extraction():
+    from tools.auto_ingest import _extract_tone_snippet
+    email_body = "Hi John,\n\nJust following up on the PR review.\n\n> On Mon, John wrote:\n> please review this\n\nLet me know if you need anything.\n\nThanks,\nSai"
+    snippet = _extract_tone_snippet(email_body)
+    # Should strip reply lines (starting with ">") and "On..." lines
+    assert ">" not in snippet
+    assert len(snippet) > 10
