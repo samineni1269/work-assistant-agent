@@ -203,13 +203,17 @@ def _graph(method: str, endpoint: str, _retry_on_401: bool = True, **kwargs) -> 
         except Exception:
             pass  # Fall through to error handling below
 
-    if response.status_code == 204:
+    # 204 No Content and 202 Accepted both mean success with no body
+    if response.status_code in (202, 204) or not response.content:
         return {"status": "success"}
     if not response.ok:
         raise RuntimeError(
             f"Graph API error {response.status_code}: {response.text[:500]}"
         )
-    return response.json()
+    try:
+        return response.json()
+    except Exception:
+        return {"status": "success", "raw": response.text[:200]}
 
 
 # ─────────────────────────────────────────────

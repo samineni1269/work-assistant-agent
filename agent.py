@@ -205,6 +205,29 @@ def _with_retry(fn, tool_name: str, max_attempts: int = 3) -> str:
     })
 
 
+def _send_email_with_log(ms, args: dict):
+    """Send email via Outlook if authenticated, else fall back to Gmail. Logs path taken."""
+    auth = ms.is_authenticated()
+    print(f"\n[SEND_EMAIL] is_authenticated={auth}  args={list(args.keys())}")
+    if auth:
+        try:
+            result = ms.send_email(**args)
+            print(f"[SEND_EMAIL] Outlook send SUCCESS: {result}")
+            return result
+        except Exception as e:
+            print(f"[SEND_EMAIL] Outlook send FAILED: {e}")
+            raise
+    else:
+        print("[SEND_EMAIL] Outlook not connected — trying Gmail SMTP fallback")
+        try:
+            result = _gmail().send_email(**args)
+            print(f"[SEND_EMAIL] Gmail send SUCCESS: {result}")
+            return result
+        except Exception as e:
+            print(f"[SEND_EMAIL] Gmail send FAILED: {e}")
+            raise
+
+
 def dispatch_tool(name: str, args: dict) -> str:
     """Call the actual tool function and return result as JSON string."""
     ms   = _ms()
@@ -248,11 +271,7 @@ def dispatch_tool(name: str, args: dict) -> str:
         # Outlook / Gmail — send_email prefers Outlook when authenticated, falls back to Gmail
         "get_emails":            lambda: ms.get_emails(**args),
         "get_email_body":        lambda: ms.get_email_body(**args),
-        "send_email":            lambda: (
-            ms.send_email(**args)
-            if ms.is_authenticated()
-            else _gmail().send_email(**args)
-        ),
+        "send_email":            lambda: _send_email_with_log(ms, args),
         "search_emails":         lambda: ms.search_emails(**args),
         # Calendar
         "get_calendar_events":   lambda: ms.get_calendar_events(**args),
@@ -1066,6 +1085,13 @@ def run_agent_turn(conversation_history: list, user_message: str,
                 result = json.dumps({"status": "cancelled", "reason": "User cancelled this operation."})
             else:
                 result = dispatch_tool(name, args)
+                # Log tool errors to terminal for easier debugging
+                try:
+                    _res = json.loads(result)
+                    if "error" in _res or "detail" in _res:
+                        print(f"\n[TOOL ERROR] {name}: {_res.get('detail') or _res.get('error')}")
+                except Exception:
+                    pass
 
             result, warn = process_tool_result(name, result)
             if warn:

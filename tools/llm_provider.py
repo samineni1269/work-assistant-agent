@@ -1235,14 +1235,17 @@ class OpenAIProvider(BaseProvider):
 
     def run_turn(self, system, history, tools):
         messages = [{"role": "system", "content": system}] + _to_openai_history(history)
+        formatted_tools = _to_openai_tools(tools) if tools else None
         try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=_to_openai_tools(tools),
-                temperature=0.1,
-            )
+            kwargs = dict(model=self.model, messages=messages, temperature=0.1)
+            if formatted_tools:
+                kwargs["tools"] = formatted_tools
+            response = self._client.chat.completions.create(**kwargs)
         except Exception as exc:
+            # Log full error to terminal so we can diagnose the real cause
+            import traceback
+            print(f"\n[MiniMax ERROR] {type(exc).__name__}: {exc}")
+            traceback.print_exc()
             raise RuntimeError(_friendly_api_error(exc, self.name.capitalize(), self.model)) from exc
         msg = response.choices[0].message
         if msg.tool_calls:
