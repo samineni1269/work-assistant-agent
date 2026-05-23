@@ -3463,6 +3463,72 @@ document.addEventListener('DOMContentLoaded',()=>{{loadTasks();setInterval(loadT
     return html
 
 
+# ── Microsoft 365 Auth (device code flow via browser) ────────────────────────
+
+# Shared state for the background device-flow thread
+_ms365_flow_state: dict = {}   # keys: flow, status ("pending"/"connected"/"failed"), error
+
+@app.route("/ms365/auth/status")
+def ms365_auth_status():
+    """Returns whether the user is authenticated with Microsoft 365."""
+    try:
+        from tools.ms365 import is_authenticated
+        ok = is_authenticated()
+    except Exception as e:
+        ok = False
+    return jsonify({"authenticated": ok})
+
+
+@app.route("/ms365/auth/start", methods=["POST"])
+def ms365_auth_start():
+    """Initiate device code flow. Returns user_code + verification_uri."""
+    import threading
+    global _ms365_flow_state
+
+    try:
+        from tools.ms365 import start_device_flow, complete_device_flow
+        flow = start_device_flow()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    _ms365_flow_state = {"status": "pending", "flow": flow, "error": None}
+
+    def _bg():
+        global _ms365_flow_state
+        try:
+            ok = complete_device_flow(flow)
+            _ms365_flow_state["status"] = "connected" if ok else "failed"
+            _ms365_flow_state["error"] = None if ok else "Sign-in timed out or was cancelled."
+        except Exception as ex:
+            _ms365_flow_state["status"] = "failed"
+            _ms365_flow_state["error"] = str(ex)
+
+    threading.Thread(target=_bg, daemon=True).start()
+
+    return jsonify({
+        "user_code":        flow.get("user_code"),
+        "verification_uri": flow.get("verification_uri"),
+        "expires_in":       flow.get("expires_in", 900),
+    })
+
+
+@app.route("/ms365/auth/poll")
+def ms365_auth_poll():
+    """Poll for device flow completion. Returns status: pending/connected/failed."""
+    status  = _ms365_flow_state.get("status", "idle")
+    error   = _ms365_flow_state.get("error")
+    return jsonify({"status": status, "error": error})
+
+
+@app.route("/ms365/auth/disconnect", methods=["POST"])
+def ms365_auth_disconnect():
+    """Remove the cached token (forces re-login next time)."""
+    global _ms365_flow_state
+    from tools.ms365 import clear_token_cache
+    _ms365_flow_state = {}
+    return jsonify(clear_token_cache())
+
+
 # ── Email inbox page ──────────────────────────────────────────────────────────
 
 @app.route("/inbox-page")
@@ -3527,21 +3593,82 @@ async function openDraftFor(emailBody){{
 }}
 
 let _emails=[];
+let _authPollingInterval=null;
+
+// ── Microsoft 365 auth flow ──────────────────────────────────────────────────
+function _authBanner(){{
+  return `<div style="background:#12141a;border:1px solid #2a3050;border-radius:10px;max-width:480px;margin:60px auto;padding:32px 36px;text-align:center">
+    <div style="font-size:40px;margin-bottom:12px">🔐</div>
+    <div style="font-size:16px;font-weight:700;color:#d4d8e8;margin-bottom:8px">Connect Microsoft 365</div>
+    <div style="font-size:12px;color:#8892b0;margin-bottom:20px">Sign in to load your Outlook emails and calendar</div>
+    <button id="ms365-connect-btn" class="btn btn-success" onclick="startMs365Auth()" style="padding:10px 28px;font-size:13px">🔗 Connect Outlook</button>
+    <div id="ms365-code-box" style="display:none;margin-top:20px">
+      <div style="font-size:11px;color:#8892b0;margin-bottom:8px">1. Open <a href="#" id="ms365-link" target="_blank" style="color:#64ffda">microsoft.com/devicelogin</a> in your browser</div>
+      <div style="font-size:11px;color:#8892b0;margin-bottom:12px">2. Enter this code:</div>
+      <div id="ms365-code" style="font-size:28px;font-weight:700;letter-spacing:4px;color:#64ffda;background:#1c2540;border-radius:8px;padding:14px 20px;display:inline-block;margin-bottom:14px">—</div>
+      <div style="font-size:11px;color:#6b7394">Waiting for sign-in… <span id="ms365-spinner">⏳</span></div>
+    </div>
+    <div id="ms365-auth-err" style="color:#ff6b6b;font-size:11px;margin-top:10px;display:none"></div>
+  </div>`;
+}}
+
+async function startMs365Auth(){{
+  document.getElementById('ms365-connect-btn').disabled=true;
+  document.getElementById('ms365-connect-btn').textContent='Starting…';
+  try{{
+    const r=await fetch('/ms365/auth/start',{{method:'POST'}}).then(r=>r.json());
+    if(r.error){{showAuthErr(r.error);return;}}
+    document.getElementById('ms365-code').textContent=r.user_code||'—';
+    const link=document.getElementById('ms365-link');
+    link.href=r.verification_uri||'https://microsoft.com/devicelogin';
+    link.textContent=r.verification_uri||'microsoft.com/devicelogin';
+    link.onclick=e=>{{e.preventDefault();window.open(r.verification_uri,'_blank');}};
+    document.getElementById('ms365-code-box').style.display='block';
+    document.getElementById('ms365-connect-btn').style.display='none';
+    _authPollingInterval=setInterval(pollMs365Auth,3000);
+  }}catch(e){{showAuthErr(e.message);}}
+}}
+
+async function pollMs365Auth(){{
+  try{{
+    const r=await fetch('/ms365/auth/poll').then(r=>r.json());
+    if(r.status==='connected'){{
+      clearInterval(_authPollingInterval);
+      document.getElementById('ms365-spinner').textContent='✅';
+      setTimeout(()=>refreshInbox(),800);
+    }}else if(r.status==='failed'){{
+      clearInterval(_authPollingInterval);
+      showAuthErr(r.error||'Sign-in failed. Please try again.');
+      document.getElementById('ms365-connect-btn').style.display='inline-block';
+      document.getElementById('ms365-connect-btn').disabled=false;
+      document.getElementById('ms365-connect-btn').textContent='🔗 Try Again';
+    }}
+  }}catch(e){{}}
+}}
+
+function showAuthErr(msg){{
+  const el=document.getElementById('ms365-auth-err');
+  if(el){{el.textContent=msg;el.style.display='block';}}
+}}
 
 async function refreshInbox(){{
+  document.getElementById('inbox-list').innerHTML='<div class="empty-state"><div class="empty-state-icon">⏳</div><div class="empty-state-txt">Checking Microsoft 365 connection…</div></div>';
+  // Check auth first
+  try{{
+    const auth=await fetch('/ms365/auth/status').then(r=>r.json());
+    if(!auth.authenticated){{
+      document.getElementById('inbox-list').innerHTML=_authBanner();
+      return;
+    }}
+  }}catch(e){{}}
   document.getElementById('inbox-list').innerHTML='<div class="empty-state"><div class="empty-state-icon">⏳</div><div class="empty-state-txt">Loading emails…</div></div>';
   try{{
-    // Call the agent to fetch emails
     const r=await fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{message:'List my 10 most recent unread emails with sender, subject, date, and a 2-sentence summary. Return as JSON array with fields: sender, subject, date, summary, body_preview.',tool_id:'outlook'}})}}).then(r=>r.json());
     if(r.error)throw new Error(r.error);
-    // Poll for result
     let tries=0;
     const poll=async()=>{{
       const j=await fetch('/poll/'+r.job_id).then(r=>r.json());
-      if(j.status==='done'){{
-        renderEmailsFromText(j.response);
-        return;
-      }}
+      if(j.status==='done'){{renderEmailsFromText(j.response);return;}}
       if(j.status==='error'){{
         document.getElementById('inbox-list').innerHTML='<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-txt">'+_esc(j.response)+'</div></div>';
         return;
@@ -3550,7 +3677,7 @@ async function refreshInbox(){{
     }};
     setTimeout(poll,1000);
   }}catch(e){{
-    document.getElementById('inbox-list').innerHTML='<div class="empty-state"><div class="empty-state-icon">📧</div><div class="empty-state-txt">Connect Outlook in .env to load emails.<br><small style="color:#3a4060">M365 credentials required</small></div></div>';
+    document.getElementById('inbox-list').innerHTML='<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-txt">Error: '+_esc(e.message)+'</div></div>';
   }}
 }}
 
@@ -3689,9 +3816,56 @@ function changeWeek(delta){{
   if(delta===0||_events.length===0)refreshCalendar();
 }}
 
+// ── Microsoft 365 auth flow (calendar page) ─────────────────────────────────
+let _calAuthPolling=null;
+
+function _calAuthBanner(){{
+  return `<div style="background:#12141a;border:1px solid #2a3050;border-radius:10px;max-width:480px;margin:40px auto;padding:32px 36px;text-align:center">
+    <div style="font-size:40px;margin-bottom:12px">🔐</div>
+    <div style="font-size:16px;font-weight:700;color:#d4d8e8;margin-bottom:8px">Connect Microsoft 365</div>
+    <div style="font-size:12px;color:#8892b0;margin-bottom:20px">Sign in to load your Outlook calendar</div>
+    <button id="cal-connect-btn" class="btn btn-success" onclick="startCalAuth()" style="padding:10px 28px;font-size:13px">🔗 Connect Outlook</button>
+    <div id="cal-code-box" style="display:none;margin-top:20px">
+      <div style="font-size:11px;color:#8892b0;margin-bottom:8px">1. Open <a id="cal-ms-link" href="#" target="_blank" style="color:#64ffda">microsoft.com/devicelogin</a></div>
+      <div style="font-size:11px;color:#8892b0;margin-bottom:12px">2. Enter this code:</div>
+      <div id="cal-code" style="font-size:28px;font-weight:700;letter-spacing:4px;color:#64ffda;background:#1c2540;border-radius:8px;padding:14px 20px;display:inline-block;margin-bottom:14px">—</div>
+      <div style="font-size:11px;color:#6b7394">Waiting for sign-in… <span id="cal-spinner">⏳</span></div>
+    </div>
+    <div id="cal-auth-err" style="color:#ff6b6b;font-size:11px;margin-top:10px;display:none"></div>
+  </div>`;
+}}
+
+async function startCalAuth(){{
+  document.getElementById('cal-connect-btn').disabled=true;
+  document.getElementById('cal-connect-btn').textContent='Starting…';
+  try{{
+    const r=await fetch('/ms365/auth/start',{{method:'POST'}}).then(r=>r.json());
+    if(r.error){{document.getElementById('cal-auth-err').textContent=r.error;document.getElementById('cal-auth-err').style.display='block';return;}}
+    document.getElementById('cal-code').textContent=r.user_code||'—';
+    const link=document.getElementById('cal-ms-link');
+    link.href=r.verification_uri||'https://microsoft.com/devicelogin';
+    link.onclick=e=>{{e.preventDefault();window.open(r.verification_uri,'_blank');}};
+    document.getElementById('cal-code-box').style.display='block';
+    document.getElementById('cal-connect-btn').style.display='none';
+    _calAuthPolling=setInterval(async()=>{{
+      const s=await fetch('/ms365/auth/poll').then(r=>r.json());
+      if(s.status==='connected'){{clearInterval(_calAuthPolling);document.getElementById('cal-spinner').textContent='✅';setTimeout(()=>refreshCalendar(),800);}}
+      else if(s.status==='failed'){{clearInterval(_calAuthPolling);document.getElementById('cal-auth-err').textContent=s.error||'Sign-in failed.';document.getElementById('cal-auth-err').style.display='block';}}
+    }},3000);
+  }}catch(e){{document.getElementById('cal-auth-err').textContent=e.message;document.getElementById('cal-auth-err').style.display='block';}}
+}}
+
 async function refreshCalendar(){{
   const days=getWeekDates(_weekOffset);
   renderCalendar(days,[]);
+  // Check auth first
+  try{{
+    const auth=await fetch('/ms365/auth/status').then(r=>r.json());
+    if(!auth.authenticated){{
+      document.getElementById('cal-wrap').innerHTML=_calAuthBanner();
+      return;
+    }}
+  }}catch(e){{}}
   try{{
     const r=await fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{message:'List all my calendar events for this week. Return JSON array with fields: subject, start (ISO datetime), end (ISO datetime), organizer.',tool_id:'outlook'}})}}).then(r=>r.json());
     if(r.error)throw new Error(r.error);
@@ -3711,7 +3885,7 @@ async function refreshCalendar(){{
     }};
     setTimeout(poll,1000);
   }}catch(e){{
-    document.getElementById('cal-wrap').innerHTML='<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-txt">Connect Outlook to load calendar events.<br><small style="color:#3a4060">M365 credentials required</small></div></div>';
+    document.getElementById('cal-wrap').innerHTML='<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-txt">Error: '+_esc(e.message)+'</div></div>';
   }}
 }}
 

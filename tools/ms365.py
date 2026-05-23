@@ -44,6 +44,55 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 TOKEN_CACHE_PATH = Path.home() / ".work-assistant-token-cache.json"
 
 
+def is_authenticated() -> bool:
+    """
+    Non-blocking check — returns True if a valid token cache exists.
+    Does NOT trigger device code flow. Safe to call from web routes.
+    """
+    if not TOKEN_CACHE_PATH.exists():
+        return False
+    try:
+        app, _cache = _build_msal_app()
+        accounts = app.get_accounts()
+        if not accounts:
+            return False
+        # Try silent token without force_refresh — fast, no network call if cached
+        result = app.acquire_token_silent(GRAPH_SCOPES, account=accounts[0])
+        return bool(result and "access_token" in result)
+    except Exception:
+        return False
+
+
+def start_device_flow() -> dict:
+    """
+    Initiate MSAL device code flow without blocking.
+    Returns {"user_code": ..., "verification_uri": ..., "expires_in": ...}
+    so the caller can display these to the user.
+    The actual token acquisition must be done in a background thread via
+    complete_device_flow(flow).
+    """
+    app, _cache = _build_msal_app()
+    flow = app.initiate_device_flow(scopes=GRAPH_SCOPES)
+    if "user_code" not in flow:
+        raise RuntimeError(f"Device flow failed: {flow.get('error_description', flow)}")
+    return flow
+
+
+def complete_device_flow(flow: dict) -> bool:
+    """
+    Block until the user completes sign-in, then persist the token cache.
+    Run this in a background thread — it blocks for up to ~15 minutes.
+    Returns True on success, False on timeout/failure.
+    """
+    app, cache = _build_msal_app()
+    result = app.acquire_token_by_device_flow(flow)
+    if "access_token" in result:
+        if cache.has_state_changed:
+            TOKEN_CACHE_PATH.write_text(cache.serialize())
+        return True
+    return False
+
+
 def clear_token_cache():
     """Delete the cached token so the user is prompted to sign in again.
     Call this if you change scopes or hit persistent auth errors."""
