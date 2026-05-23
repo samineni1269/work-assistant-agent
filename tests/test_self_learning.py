@@ -97,3 +97,26 @@ def test_tone_snippet_extraction():
     # Should strip reply lines (starting with ">") and "On..." lines
     assert ">" not in snippet
     assert len(snippet) > 10
+
+def test_extract_meeting_keywords():
+    from tools.meeting_prep import extract_keywords
+    keywords = extract_keywords("Sprint Planning with Sarah and the backend team")
+    assert "Sarah" in keywords
+    # "Sprint" or "Planning" should appear (capitalised words)
+    assert any(k in keywords for k in ["Sprint", "Planning", "Sprint Planning"])
+    # "backend" should appear (>4 chars, not a stopword)
+    assert "backend" in keywords
+
+def test_build_meeting_brief_no_crash():
+    from tools.meeting_prep import build_meeting_brief
+    # Should not raise even with no credentials configured
+    event = {
+        "subject": "Sprint Review",
+        "start": "2026-06-01T10:00:00Z",
+        "end": "2026-06-01T11:00:00Z",
+        "attendees": ["Alice Smith", "Bob Jones"],
+        "body": ""
+    }
+    brief = build_meeting_brief(event)
+    assert "Sprint Review" in brief
+    assert brief.startswith("## 📅")
