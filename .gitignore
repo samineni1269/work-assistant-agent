@@ -48,6 +48,13 @@ Desktop.ini
 *.swp
 *.swo
 
+# ── Runtime data (personal data / logs — never commit) ───────────────────────
+analytics.jsonl
+memory.json
+*.work-assistant-scheduler.db
+chroma_db/
+knowledge_base/
+
 # ── Misc runtime files ────────────────────────────────────────────────────────
 *.bak
 *.tmp
