@@ -302,15 +302,29 @@ TOOLS = [
      }}},
 
     {"name": "create_word_document",
-     "description": "Create a new Word document and upload it to OneDrive. WRITE — confirm before creating.",
-     "parameters": {"type": "object", "required": ["filename", "title", "sections"], "properties": {
-         "filename":      {"type": "string"},
-         "title":         {"type": "string"},
-         "sections":      {"type": "array", "items": {"type": "object", "properties": {
-             "heading": {"type": "string"},
-             "content": {"type": "string"},
-         }}, "description": "List of sections"},
-         "upload_folder": {"type": "string", "description": "OneDrive folder (default: '/')"},
+     "description": "Create a new Word document saved locally (~/work-assistant-docs/). WRITE — confirm before creating.",
+     "parameters": {"type": "object", "required": ["title", "sections"], "properties": {
+         "title":    {"type": "string", "description": "Document title shown as heading"},
+         "subtitle": {"type": "string", "description": "Optional subtitle"},
+         "filename": {"type": "string", "description": "Output filename e.g. 'Report.docx' (optional, auto-generated from title)"},
+         "sections": {"type": "array", "description": "List of sections", "items": {"type": "object", "properties": {
+             "heading": {"type": "string", "description": "Section heading"},
+             "content": {"type": "array", "items": {"type": "string"}, "description": "Lines of text / bullet points"},
+             "style":   {"type": "string", "enum": ["paragraph", "bullets", "table"], "description": "How to render content (default: paragraph)"},
+             "table_data": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "2-D array for table style — first row is headers"},
+         }}},
+     }}},
+
+    {"name": "list_documents",
+     "description": "List all locally saved documents (Word and PowerPoint) in the document library.",
+     "parameters": {"type": "object", "properties": {
+         "doc_type": {"type": "string", "enum": ["docx", "pptx"], "description": "Filter by type (optional)"},
+     }}},
+
+    {"name": "delete_document",
+     "description": "Delete a document from the local library by its ID. WRITE — confirm before deleting.",
+     "parameters": {"type": "object", "required": ["doc_id"], "properties": {
+         "doc_id": {"type": "integer", "description": "Document ID from list_documents"},
      }}},
 
     {"name": "update_word_document",
@@ -339,17 +353,19 @@ TOOLS = [
      }}},
 
     {"name": "create_presentation",
-     "description": "Create a PowerPoint presentation with a cover slide and content slides, then upload to OneDrive. WRITE — confirm.",
-     "parameters": {"type": "object", "required": ["filename", "title", "slides"], "properties": {
-         "filename": {"type": "string"},
-         "title":    {"type": "string"},
-         "slides":   {"type": "array", "items": {"type": "object", "properties": {
-             "title":   {"type": "string"},
-             "bullets": {"type": "array", "items": {"type": "string"}},
-             "notes":   {"type": "string"},
+     "description": "Create a PowerPoint presentation saved locally (~/work-assistant-docs/). WRITE — confirm.",
+     "parameters": {"type": "object", "required": ["title", "slides"], "properties": {
+         "title":    {"type": "string", "description": "Presentation title (shown on cover slide)"},
+         "filename": {"type": "string", "description": "Output filename e.g. 'Deck.pptx' (optional, auto-generated)"},
+         "theme":    {"type": "string", "enum": ["blue", "dark", "minimal"], "description": "Colour theme (default: blue)"},
+         "slides":   {"type": "array", "description": "Slides to create", "items": {"type": "object", "properties": {
+             "title":   {"type": "string", "description": "Slide title"},
+             "layout":  {"type": "string", "enum": ["title", "bullets", "two_col", "blank"], "description": "Slide layout (default: bullets)"},
+             "content": {"type": "array", "items": {"type": "string"}, "description": "Bullet points (for bullets layout)"},
+             "col1":    {"type": "array", "items": {"type": "string"}, "description": "Left column bullets (two_col layout)"},
+             "col2":    {"type": "array", "items": {"type": "string"}, "description": "Right column bullets (two_col layout)"},
+             "notes":   {"type": "string", "description": "Speaker notes"},
          }}},
-         "theme":         {"type": "string", "enum": ["dark", "light"]},
-         "upload_folder": {"type": "string"},
      }}},
 
     {"name": "add_slide_to_presentation",

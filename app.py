@@ -2218,6 +2218,7 @@ _PAGE_NAV = """
   <a href="/search-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">🔍 Search</a>
   <a href="/inbox-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">📧 Inbox</a>
   <a href="/calendar-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">📅 Calendar</a>
+  <a href="/documents-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">📄 Documents</a>
 </div>
 """
 
@@ -3698,6 +3699,233 @@ document.addEventListener('DOMContentLoaded',()=>{{
 </script>
 </body></html>"""
     return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DOCUMENTS LIBRARY
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/documents")
+def api_documents():
+    doc_type = request.args.get("type")
+    try:
+        from tools import doc_creator
+        docs = doc_creator.list_documents(doc_type=doc_type or None)
+        return jsonify({"documents": docs})
+    except Exception as e:
+        return jsonify({"documents": [], "error": str(e)})
+
+
+@app.route("/documents/<int:doc_id>", methods=["DELETE"])
+def api_delete_document(doc_id):
+    try:
+        from tools import doc_creator
+        result = doc_creator.delete_document(doc_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/documents-page")
+def documents_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Documents — Work Assistant</title>
+{_PAGE_STYLE}
+<style>
+.doc-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:4px}}
+.doc-card{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:10px;transition:border-color .2s,box-shadow .2s}}
+.doc-card:hover{{border-color:#3a4060;box-shadow:0 4px 20px rgba(0,0,0,.4)}}
+.doc-icon{{font-size:32px;line-height:1}}
+.doc-name{{font-size:13px;font-weight:700;color:#d4d8e8;word-break:break-word}}
+.doc-meta{{font-size:11px;color:#8892b0;line-height:1.7}}
+.doc-badge{{display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;letter-spacing:.5px}}
+.badge-docx{{background:#1c2540;color:#64ffda;border:1px solid #243060}}
+.badge-pptx{{background:#2a1f3a;color:#bd93f9;border:1px solid #3a2a5a}}
+.doc-actions{{display:flex;gap:8px;margin-top:auto}}
+.btn-open{{flex:1;padding:6px 0;border-radius:6px;border:none;background:#1c2540;color:#64ffda;font-size:12px;cursor:pointer;font-weight:600}}
+.btn-open:hover{{background:#22304a}}
+.btn-del{{padding:6px 10px;border-radius:6px;border:none;background:#1e1e2a;color:#ff5555;font-size:12px;cursor:pointer}}
+.btn-del:hover{{background:#2a1e1e}}
+.empty-state{{text-align:center;padding:80px 20px;color:#8892b0}}
+.empty-state .es-icon{{font-size:48px;margin-bottom:12px}}
+.empty-state h3{{color:#d4d8e8;margin:0 0 8px}}
+.filter-tabs{{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}}
+.ftab{{padding:6px 14px;border-radius:20px;border:1px solid #252836;background:#1a1c24;color:#8892b0;font-size:12px;cursor:pointer;transition:all .2s}}
+.ftab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.doc-stats{{display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap}}
+.dstat{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:10px 18px;text-align:center;min-width:100px}}
+.dstat-num{{font-size:22px;font-weight:800;color:#64ffda}}
+.dstat-lbl{{font-size:11px;color:#8892b0;margin-top:2px}}
+</style>
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">📄 Document Library</div>
+      <div class="page-subtitle">Word documents and PowerPoint presentations created by the agent</div>
+    </div>
+    <button class="btn btn-primary" onclick="window.location='/'">＋ Create in Chat</button>
+  </div>
+
+  <div class="doc-stats">
+    <div class="dstat"><div class="dstat-num" id="stat-total">—</div><div class="dstat-lbl">Total</div></div>
+    <div class="dstat"><div class="dstat-num" id="stat-docx" style="color:#64ffda">—</div><div class="dstat-lbl">Word Docs</div></div>
+    <div class="dstat"><div class="dstat-num" id="stat-pptx" style="color:#bd93f9">—</div><div class="dstat-lbl">Presentations</div></div>
+    <div class="dstat"><div class="dstat-num" id="stat-size">—</div><div class="dstat-lbl">Total Size</div></div>
+  </div>
+
+  <div class="filter-tabs">
+    <button class="ftab active" data-f="all" onclick="setFilter('all',this)">All</button>
+    <button class="ftab" data-f="docx" onclick="setFilter('docx',this)">📄 Word</button>
+    <button class="ftab" data-f="pptx" onclick="setFilter('pptx',this)">📊 PowerPoint</button>
+  </div>
+
+  <div class="doc-grid" id="doc-grid">
+    <div class="empty-state"><div class="es-icon">⏳</div><h3>Loading…</h3></div>
+  </div>
+</div>
+
+<script>
+let _allDocs = [];
+let _filter  = 'all';
+
+async function loadDocs() {{
+  try {{
+    const r = await fetch('/documents');
+    const d = await r.json();
+    _allDocs = d.documents || [];
+    renderStats();
+    renderGrid();
+  }} catch(e) {{
+    document.getElementById('doc-grid').innerHTML =
+      `<div class="empty-state"><div class="es-icon">❌</div><h3>Failed to load</h3><p>${{e.message}}</p></div>`;
+  }}
+}}
+
+function renderStats() {{
+  const docx = _allDocs.filter(d=>d.doc_type==='docx');
+  const pptx = _allDocs.filter(d=>d.doc_type==='pptx');
+  const totalBytes = _allDocs.reduce((s,d)=>s+(d.size_bytes||0),0);
+  document.getElementById('stat-total').textContent = _allDocs.length;
+  document.getElementById('stat-docx').textContent  = docx.length;
+  document.getElementById('stat-pptx').textContent  = pptx.length;
+  document.getElementById('stat-size').textContent  = fmtBytes(totalBytes);
+}}
+
+function fmtBytes(b) {{
+  if(b<1024) return b+'B';
+  if(b<1048576) return (b/1024).toFixed(1)+'KB';
+  return (b/1048576).toFixed(1)+'MB';
+}}
+
+function fmtDate(s) {{
+  if(!s) return '';
+  const d = new Date(s);
+  return d.toLocaleDateString('en-GB',{{day:'2-digit',month:'short',year:'numeric'}});
+}}
+
+function setFilter(f, el) {{
+  _filter = f;
+  document.querySelectorAll('.ftab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  renderGrid();
+}}
+
+function renderGrid() {{
+  const docs = _filter==='all' ? _allDocs : _allDocs.filter(d=>d.doc_type===_filter);
+  const grid = document.getElementById('doc-grid');
+  if(!docs.length) {{
+    const msg = _filter==='all'
+      ? '<h3>No documents yet</h3><p>Ask the agent to create a Word document or presentation.</p>'
+      : `<h3>No ${{_filter==='docx'?'Word documents':'presentations'}} yet</h3>`;
+    grid.innerHTML = `<div class="empty-state"><div class="es-icon">📂</div>${{msg}}</div>`;
+    return;
+  }}
+  grid.innerHTML = docs.map(doc => {{
+    const icon  = doc.doc_type==='pptx' ? '📊' : '📄';
+    const badge = doc.doc_type==='pptx'
+      ? '<span class="doc-badge badge-pptx">PPTX</span>'
+      : '<span class="doc-badge badge-docx">DOCX</span>';
+    const extra = doc.doc_type==='pptx'
+      ? (doc.slide_count ? `<span>🖼 ${{doc.slide_count}} slides</span>` : '')
+      : (doc.page_count  ? `<span>📃 ${{doc.page_count}} pages</span>` : '');
+    return `
+    <div class="doc-card" id="card-${{doc.id}}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div class="doc-icon">${{icon}}</div>
+        ${{badge}}
+      </div>
+      <div class="doc-name">${{escHtml(doc.title)}}</div>
+      <div class="doc-meta">
+        <span>📁 ${{escHtml(doc.filename)}}</span><br>
+        <span>📅 ${{fmtDate(doc.created_at)}}</span>
+        ${{doc.size_bytes ? `&nbsp;·&nbsp;<span>${{fmtBytes(doc.size_bytes)}}</span>` : ''}}
+        ${{extra ? `<br>${{extra}}` : ''}}
+      </div>
+      <div class="doc-actions">
+        <button class="btn-open" onclick="openDoc(${{doc.id}}, '${{escAttr(doc.filepath)}}')">📂 Open File</button>
+        <button class="btn-del" onclick="deleteDoc(${{doc.id}})" title="Delete">🗑</button>
+      </div>
+    </div>`;
+  }}).join('');
+}}
+
+function escHtml(s) {{
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+function escAttr(s) {{
+  return String(s||'').replace(/'/g,"\\'");
+}}
+
+async function openDoc(id, filepath) {{
+  // Use fetch to get the system path and open it via the OS open command
+  try {{
+    const r = await fetch('/document-open', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id}}) }});
+    const d = await r.json();
+    if(d.status!=='ok') alert('Could not open file: '+d.message);
+  }} catch(e) {{
+    alert('Could not open: '+e.message);
+  }}
+}}
+
+async function deleteDoc(id) {{
+  if(!confirm('Delete this document? This cannot be undone.')) return;
+  const r = await fetch('/documents/'+id, {{method:'DELETE'}});
+  const d = await r.json();
+  if(d.status==='deleted') {{
+    _allDocs = _allDocs.filter(x=>x.id!==id);
+    renderStats();
+    renderGrid();
+  }} else {{
+    alert('Delete failed: '+(d.message||'unknown error'));
+  }}
+}}
+
+loadDocs();
+</script>
+</body></html>"""
+    return html
+
+
+@app.route("/document-open", methods=["POST"])
+def api_open_document():
+    """Open a document with the OS default application."""
+    import subprocess
+    data = request.get_json() or {}
+    doc_id = data.get("id")
+    try:
+        from tools import doc_creator
+        path = doc_creator.get_document_path(doc_id)
+        if not path:
+            return jsonify({"status": "error", "message": "Document not found"})
+        subprocess.Popen(["open", path])  # macOS; works for .docx and .pptx
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -42,6 +42,10 @@ def _docs():
     from tools import office_docs
     return office_docs
 
+def _doc_creator():
+    from tools import doc_creator
+    return doc_creator
+
 def _gh():
     from tools import github_tool
     return github_tool
@@ -274,13 +278,16 @@ def dispatch_tool(name: str, args: dict) -> str:
         # Word
         "read_word_document":      lambda: docs.read_word_document(**args),
         "list_word_headings":      lambda: docs.list_word_headings(**args),
-        "create_word_document":    lambda: docs.create_word_document(**args),
         "update_word_document":    lambda: docs.update_word_document(**args),
         # PowerPoint
         "read_presentation":           lambda: docs.read_presentation(**args),
         "get_presentation_summary":    lambda: docs.get_presentation_summary(**args),
-        "create_presentation":         lambda: docs.create_presentation(**args),
         "add_slide_to_presentation":   lambda: docs.add_slide_to_presentation(**args),
+        # Local document creator (saves to ~/work-assistant-docs + tracked in web UI)
+        "create_word_document":    lambda: _doc_creator().create_word_document(**args),
+        "create_presentation":     lambda: _doc_creator().create_presentation(**args),
+        "list_documents":          lambda: _doc_creator().list_documents(**args),
+        "delete_document":         lambda: _doc_creator().delete_document(**args),
         # GitHub
         "get_my_open_prs":             lambda: gh.get_my_open_prs(**args),
         "get_github_notifications":    lambda: gh.get_github_notifications(**args),
