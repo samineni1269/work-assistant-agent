@@ -245,13 +245,13 @@ def dispatch_tool(name: str, args: dict) -> str:
         # SharePoint sites
         "get_sharepoint_sites":   lambda: ms.get_sharepoint_sites(**args),
 
-        # Outlook / Gmail — send_email uses Gmail SMTP if configured, falls back to MS365
+        # Outlook / Gmail — send_email prefers Outlook when authenticated, falls back to Gmail
         "get_emails":            lambda: ms.get_emails(**args),
         "get_email_body":        lambda: ms.get_email_body(**args),
         "send_email":            lambda: (
-            _gmail().send_email(**args)
-            if os.getenv("GMAIL_APP_PASSWORD", "").strip()
-            else ms.send_email(**args)
+            ms.send_email(**args)
+            if ms.is_authenticated()
+            else _gmail().send_email(**args)
         ),
         "search_emails":         lambda: ms.search_emails(**args),
         # Calendar
