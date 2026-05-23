@@ -5589,15 +5589,16 @@ loadEvents('all',document.querySelector('.whtab'));
 def api_alert_feedback():
     """Record user feedback on an alert (Feature 6 — Proactive Alert Tuning)."""
     data = request.get_json(silent=True) or {}
-    alert_type = data.get("alert_type", "")
+    alert_type = (data.get("alert_type", "") or "")[:64]
     action = data.get("action", "")   # "dismissed" or "acted"
-    if alert_type and action in ("dismissed", "acted"):
-        try:
-            from tools.self_learning import record_alert_action
-            record_alert_action(alert_type, action)
-        except Exception:
-            pass
-    return jsonify({"status": "ok"})
+    if not alert_type or action not in ("dismissed", "acted"):
+        return jsonify({"error": "invalid input"}), 400
+    try:
+        from tools.self_learning import record_alert_action
+        record_alert_action(alert_type, action)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/corrections", methods=["GET"])
@@ -5700,15 +5701,20 @@ async function load() {{
   document.getElementById('briefing-hour').textContent = d.briefing_hour + ':00';
 
   const clusters = d.query_clusters || [];
-  document.getElementById('clusters').innerHTML = clusters.length
-    ? '<table><thead><tr><th>Pattern</th><th>Count</th></tr></thead><tbody>' +
-      clusters.map(c => `<tr><td>${{c.label}}</td><td>${{c.count}}</td></tr>`).join('') +
-      '</tbody></table>'
-    : '<p style="color:#64748b">No clusters yet — chat more with the agent!</p>';
+  if (clusters.length) {{
+    let rows = clusters.map(c => {{
+      const label = c.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return `<tr><td>${{label}}</td><td>${{c.count}}</td></tr>`;
+    }}).join('');
+    document.getElementById('clusters').innerHTML =
+      '<table><thead><tr><th>Pattern</th><th>Count</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }} else {{
+    document.getElementById('clusters').innerHTML = '<p style="color:#64748b">No clusters yet — chat more with the agent!</p>';
+  }}
 
   const skipped = d.skipped_tools || [];
   document.getElementById('skipped').innerHTML = skipped.length
-    ? skipped.map(t => `<span class="badge muted">⚠ ${{t}}</span>`).join(' ')
+    ? skipped.map(t => {{ const s = t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); return `<span class="badge muted">⚠ ${{s}}</span>`; }}).join(' ')
     : '<span style="color:#64748b">No tools are being skipped</span>';
 }}
 
@@ -5716,10 +5722,11 @@ async function loadCorrections() {{
   const r = await fetch('/api/corrections');
   const data = await r.json();
   const tbody = document.getElementById('corrections-tbody');
-  tbody.innerHTML = data.map((c, i) =>
-    `<tr><td>${{c.correction}}</td><td>${{c.count}}</td>
-     <td><button onclick="deleteCorrection(${{i}})">✕</button></td></tr>`
-  ).join('');
+  tbody.innerHTML = data.map((c, i) => {{
+    const correction = (c.correction || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<tr><td>${{correction}}</td><td>${{c.count}}</td>
+     <td><button onclick="deleteCorrection(${{i}})">✕</button></td></tr>`;
+  }}).join('');
 }}
 
 async function deleteCorrection(idx) {{
