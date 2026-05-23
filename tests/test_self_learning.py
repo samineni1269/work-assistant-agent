@@ -120,3 +120,21 @@ def test_build_meeting_brief_no_crash():
     brief = build_meeting_brief(event)
     assert "Sprint Review" in brief
     assert brief.startswith("## 📅")
+
+def test_preference_extraction(tmp_path):
+    import tools.memory as mod
+    from unittest.mock import patch
+    mem_file = tmp_path / "memory.json"
+    counter_file = tmp_path / "counter.json"
+    with patch.object(mod, "MEMORY_FILE", mem_file), \
+         patch.object(mod, "_EXTRACTION_COUNTER_FILE", counter_file):
+        conversation = [
+            {"role": "user", "content": "I prefer concise bullet points, not long paragraphs"},
+            {"role": "assistant", "content": "Got it"},
+            {"role": "user", "content": "my timezone is GMT+5:30"},
+        ]
+        mod.preference_extraction(conversation, force=True)
+        mem = mod.load_memory()
+        prefs = str(mem.get("preferences", {}))
+        patterns = str(mem.get("patterns", {}))
+        assert "concise" in prefs or "GMT" in prefs or "GMT" in patterns

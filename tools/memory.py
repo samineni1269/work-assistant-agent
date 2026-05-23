@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 MEMORY_FILE = Path(__file__).parent.parent / "memory.json"
+_EXTRACTION_COUNTER_FILE = Path(__file__).parent.parent / "extraction_counter.json"
 
 _EMPTY = {
     "preferences": {},
@@ -291,3 +292,70 @@ def get_memory_summary() -> dict:
     mem.pop("updated_at", None)
     total = sum(len(v) for v in mem.values() if isinstance(v, dict))
     return {"total_facts": total, "memory": mem}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PREFERENCE EXTRACTION — auto-scan conversations every 5 turns
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _get_extraction_counter() -> int:
+    if _EXTRACTION_COUNTER_FILE.exists():
+        try:
+            return json.loads(_EXTRACTION_COUNTER_FILE.read_text()).get("count", 0)
+        except Exception:
+            pass
+    return 0
+
+
+def _increment_extraction_counter() -> int:
+    count = _get_extraction_counter() + 1
+    _EXTRACTION_COUNTER_FILE.write_text(json.dumps({"count": count}))
+    return count
+
+
+_PREFERENCE_PATTERNS = [
+    (r"\bI prefer\b(.{3,80})",           "preferences", "style"),
+    (r"\bmy timezone is\b\s*(.{2,20})",  "preferences", "timezone"),
+    (r"\bI(?: always)? work\b(.{3,60})", "patterns",    "work_pattern"),
+    (r"\bI(?: usually)? start (?:work )?at\b(.{3,20})", "patterns", "start_time"),
+    (r"\bI(?: usually)? finish (?:work )?at\b(.{3,20})", "patterns", "end_time"),
+    (r"\bdon'?t (?:use|include|show)\b(.{3,60})",        "preferences", "avoid"),
+    (r"\bkeep (?:it|responses?)\b(.{3,60})",              "preferences", "response_style"),
+]
+
+_PREFERENCE_RE = [(re.compile(p, re.IGNORECASE), cat, key) for p, cat, key in _PREFERENCE_PATTERNS]
+
+
+def preference_extraction(conversation_history: list, force: bool = False):
+    """
+    Scan conversation history for preference statements every 5 turns.
+    Saves matches to memory.json.
+    Args:
+        conversation_history: list of {"role": ..., "content": ...} dicts
+        force: run regardless of turn counter
+    """
+    count = _increment_extraction_counter()
+    if not force and count % 5 != 0:
+        return
+
+    mem = load_memory()
+    changed = False
+
+    for turn in conversation_history:
+        if turn.get("role") != "user":
+            continue
+        text = turn.get("content", "") or ""
+        for pattern, category, key in _PREFERENCE_RE:
+            m = pattern.search(text)
+            if not m:
+                continue
+            value = m.group(1).strip(" .,;")
+            if not value:
+                continue
+            actual_key = key or re.sub(r"\W+", "_", value[:20].lower())
+            if mem.get(category, {}).get(actual_key) != value:
+                mem.setdefault(category, {})[actual_key] = value
+                changed = True
+
+    if changed:
+        save_memory(mem)
