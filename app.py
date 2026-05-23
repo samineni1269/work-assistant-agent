@@ -2208,18 +2208,41 @@ input:checked+.toggle-slider:before{transform:translateX(14px);background:#50fa7
 """
 
 _PAGE_NAV = """
-<div style="background:#1a1c24;border-bottom:1px solid #252836;padding:10px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-  <a href="/" style="font-size:13px;font-weight:700;color:#64ffda;text-decoration:none">⚡ Work Assistant</a>
-  <span style="color:#252836">|</span>
-  <a href="/actions-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">✅ Actions</a>
-  <a href="/triggers-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">⚡ Automation</a>
-  <a href="/memory-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">🧠 Memory</a>
-  <a href="/scheduler-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">🕐 Scheduler</a>
-  <a href="/search-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">🔍 Search</a>
-  <a href="/inbox-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">📧 Inbox</a>
-  <a href="/calendar-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">📅 Calendar</a>
-  <a href="/documents-page" style="font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px" onmouseover="this.style.color='#d4d8e8'" onmouseout="this.style.color='#8892b0'">📄 Documents</a>
+<div style="background:#1a1c24;border-bottom:1px solid #252836;padding:8px 20px">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+    <a href="/" style="font-size:13px;font-weight:700;color:#64ffda;text-decoration:none;flex-shrink:0">⚡ Work Assistant</a>
+    <span style="color:#252836;flex-shrink:0">|</span>
+    <a href="/actions-page" class="nav-link">✅ Actions</a>
+    <a href="/triggers-page" class="nav-link">⚡ Automation</a>
+    <a href="/memory-page" class="nav-link">🧠 Memory</a>
+    <a href="/scheduler-page" class="nav-link">🕐 Scheduler</a>
+    <a href="/search-page" class="nav-link">🔍 Search</a>
+    <a href="/inbox-page" class="nav-link">📧 Inbox</a>
+    <a href="/calendar-page" class="nav-link">📅 Calendar</a>
+    <a href="/documents-page" class="nav-link">📄 Documents</a>
+    <a href="/analytics-page" class="nav-link">📊 Analytics</a>
+    <a href="/guardrails-page" class="nav-link">🛡 Guardrails</a>
+    <a href="/kb-page" class="nav-link">🧠 Knowledge Base</a>
+    <a href="/alerts-page" class="nav-link">🔔 Alerts</a>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <span style="font-size:10px;color:#3a4060;font-weight:700;letter-spacing:.5px;flex-shrink:0">TOOLS:</span>
+    <a href="/github-page" class="nav-link-tool">🐙 GitHub</a>
+    <a href="/jira-page" class="nav-link-tool">📋 Jira</a>
+    <a href="/linear-page" class="nav-link-tool">⚡ Linear</a>
+    <a href="/slack-page" class="nav-link-tool">💬 Slack</a>
+    <a href="/notion-page" class="nav-link-tool">📓 Notion</a>
+    <a href="/meetings-page" class="nav-link-tool">📹 Meetings</a>
+    <a href="/webhooks-page" class="nav-link-tool">🪝 Webhooks</a>
+    <a href="/meeting-prep-page" class="nav-link-tool">🗓 Meeting Prep</a>
+  </div>
 </div>
+<style>
+.nav-link{font-size:11.5px;color:#8892b0;text-decoration:none;padding:3px 8px;border-radius:4px;transition:color .15s}
+.nav-link:hover{color:#d4d8e8}
+.nav-link-tool{font-size:11px;color:#6872a0;text-decoration:none;padding:2px 8px;border-radius:4px;border:1px solid #1e2030;background:#16171f;transition:all .15s}
+.nav-link-tool:hover{color:#d4d8e8;border-color:#3a4060}
+</style>
 """
 
 
@@ -3926,6 +3949,1428 @@ def api_open_document():
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GITHUB DASHBOARD — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/github/prs")
+def api_github_prs():
+    try:
+        from tools import github_tool
+        return jsonify({"prs": github_tool.get_my_open_prs(max_count=20)})
+    except Exception as e:
+        return jsonify({"prs": [], "error": str(e)})
+
+@app.route("/github/notifications")
+def api_github_notifications():
+    try:
+        from tools import github_tool
+        return jsonify({"notifications": github_tool.get_github_notifications(unread_only=True, max_count=30)})
+    except Exception as e:
+        return jsonify({"notifications": [], "error": str(e)})
+
+@app.route("/github/reviews")
+def api_github_reviews():
+    try:
+        from tools import github_tool
+        return jsonify({"reviews": github_tool.get_my_review_requests(max_count=20)})
+    except Exception as e:
+        return jsonify({"reviews": [], "error": str(e)})
+
+@app.route("/github/issues")
+def api_github_issues():
+    try:
+        from tools import github_tool
+        return jsonify({"issues": github_tool.list_my_github_issues(max_count=20)})
+    except Exception as e:
+        return jsonify({"issues": [], "error": str(e)})
+
+@app.route("/github-page")
+def github_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitHub — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.gh-tab-bar{{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}}
+.gh-tab{{padding:7px 16px;border-radius:20px;border:1px solid #252836;background:#1a1c24;color:#8892b0;font-size:12px;cursor:pointer;transition:all .2s}}
+.gh-tab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.gh-badge{{display:inline-block;background:#ff5555;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:5px}}
+.pr-item{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px}}
+.pr-item:hover{{border-color:#3a4060}}
+.pr-icon{{font-size:18px;flex-shrink:0;margin-top:2px}}
+.pr-body{{flex:1;min-width:0}}
+.pr-title{{font-size:13px;font-weight:600;color:#d4d8e8;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.pr-meta{{font-size:11px;color:#8892b0;display:flex;gap:10px;flex-wrap:wrap}}
+.state-open{{color:#50fa7b}}.state-closed{{color:#ff5555}}.state-merged{{color:#bd93f9}}
+.notif-item{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:12px 14px;margin-bottom:6px;display:flex;gap:10px;align-items:flex-start}}
+.notif-item:hover{{border-color:#3a4060}}
+.notif-body{{flex:1;min-width:0}}
+.notif-title{{font-size:12.5px;color:#d4d8e8;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.notif-sub{{font-size:11px;color:#8892b0}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">🐙 GitHub</div><div class="page-subtitle">Pull requests, reviews, notifications and issues</div></div>
+    <button class="btn btn-primary" onclick="loadAll()">↻ Refresh</button>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="s-prs">—</div><div class="stat-lbl">Open PRs</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-rev" style="color:#ffb86c">—</div><div class="stat-lbl">Review Requests</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-notif" style="color:#ff5555">—</div><div class="stat-lbl">Notifications</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-issues" style="color:#bd93f9">—</div><div class="stat-lbl">My Issues</div></div>
+  </div>
+  <div class="gh-tab-bar">
+    <button class="gh-tab active" onclick="showTab('prs',this)">🔀 My PRs <span class="gh-badge" id="b-prs">…</span></button>
+    <button class="gh-tab" onclick="showTab('reviews',this)">👁 Reviews <span class="gh-badge" id="b-rev">…</span></button>
+    <button class="gh-tab" onclick="showTab('notifications',this)">🔔 Notifications <span class="gh-badge" id="b-notif">…</span></button>
+    <button class="gh-tab" onclick="showTab('issues',this)">🐛 Issues <span class="gh-badge" id="b-issues">…</span></button>
+  </div>
+  <div id="tab-prs"></div>
+  <div id="tab-reviews" style="display:none"></div>
+  <div id="tab-notifications" style="display:none"></div>
+  <div id="tab-issues" style="display:none"></div>
+</div>
+<script>
+let _data = {{prs:[],reviews:[],notifications:[],issues:[]}};
+function showTab(name,el){{
+  ['prs','reviews','notifications','issues'].forEach(t=>{{
+    document.getElementById('tab-'+t).style.display='none';
+  }});
+  document.querySelectorAll('.gh-tab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+name).style.display='';
+  el.classList.add('active');
+}}
+function prCard(p){{
+  const state=p.state||'open';
+  const cls='state-'+state;
+  const repo=(p.repo||'').split('/').pop()||p.repo||'';
+  return `<div class="pr-item"><div class="pr-icon">🔀</div><div class="pr-body">
+    <div class="pr-title" title="${{escH(p.title||'')}}">${{escH(p.title||'Untitled')}}</div>
+    <div class="pr-meta">
+      <span>${{escH(repo)}}</span>
+      <span class="${{cls}}">● ${{state}}</span>
+      ${{p.number?`<span>#${{p.number}}</span>`:''}}
+      ${{p.created_at?`<span>📅 ${{fmtDate(p.created_at)}}</span>`:''}}
+    </div>
+  </div></div>`;
+}}
+function notifCard(n){{
+  const icon = n.type==='PullRequest'?'🔀':n.type==='Issue'?'🐛':n.type==='Release'?'🚀':'🔔';
+  return `<div class="notif-item"><div style="font-size:18px;flex-shrink:0">${{icon}}</div><div class="notif-body">
+    <div class="notif-title" title="${{escH(n.title||'')}}">${{escH(n.title||'')}}</div>
+    <div class="notif-sub">${{escH(n.repo||'')}}&nbsp;·&nbsp;${{n.type||''}}&nbsp;·&nbsp;${{fmtDate(n.updated_at||'')}}</div>
+  </div></div>`;
+}}
+function issueCard(i){{
+  return `<div class="pr-item"><div class="pr-icon">🐛</div><div class="pr-body">
+    <div class="pr-title">${{escH(i.title||'')}}</div>
+    <div class="pr-meta">
+      <span>${{escH(i.repo||'')}}</span>
+      ${{i.number?`<span>#${{i.number}}</span>`:''}}
+      ${{i.state?`<span class="state-${{i.state}}">● ${{i.state}}</span>`:''}}
+      ${{i.labels&&i.labels.length?i.labels.slice(0,3).map(l=>`<span style="color:#bd93f9">${{escH(l)}}</span>`).join(''):''}}
+    </div>
+  </div></div>`;
+}}
+function renderList(containerId, items, cardFn){{
+  const el=document.getElementById(containerId);
+  el.innerHTML=items.length?items.map(cardFn).join(''):'<div class="empty-msg">Nothing here ✓</div>';
+}}
+async function loadAll(){{
+  const endpoints=[
+    ['/github/prs','prs','s-prs','b-prs',prCard,'tab-prs'],
+    ['/github/reviews','reviews','s-rev','b-rev',prCard,'tab-reviews'],
+    ['/github/notifications','notifications','s-notif','b-notif',notifCard,'tab-notifications'],
+    ['/github/issues','issues','s-issues','b-issues',issueCard,'tab-issues'],
+  ];
+  for(const [url,key,sid,bid,cardFn,tabId] of endpoints){{
+    try{{
+      const r=await fetch(url); const d=await r.json();
+      const items=d[key]||[];
+      _data[key]=items;
+      document.getElementById(sid).textContent=items.length;
+      document.getElementById(bid).textContent=items.length;
+      renderList(tabId,items,cardFn);
+    }}catch(e){{
+      document.getElementById(tabId).innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;
+    }}
+  }}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+function fmtDate(s){{if(!s)return'';const d=new Date(s);return d.toLocaleDateString('en-GB',{{day:'2-digit',month:'short'}});}}
+loadAll();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JIRA / CONFLUENCE — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/jira/issues")
+def api_jira_issues():
+    status = request.args.get("status")
+    try:
+        from tools import atlassian
+        return jsonify({"issues": atlassian.get_my_jira_issues(max_results=30, status=status or None)})
+    except Exception as e:
+        return jsonify({"issues": [], "error": str(e)})
+
+@app.route("/jira/projects")
+def api_jira_projects():
+    try:
+        from tools import atlassian
+        return jsonify({"projects": atlassian.get_jira_projects()})
+    except Exception as e:
+        return jsonify({"projects": [], "error": str(e)})
+
+@app.route("/confluence/search")
+def api_confluence_search():
+    q = request.args.get("q", "")
+    try:
+        from tools import atlassian
+        return jsonify({"pages": atlassian.search_confluence(q, max_results=15)})
+    except Exception as e:
+        return jsonify({"pages": [], "error": str(e)})
+
+@app.route("/jira-page")
+def jira_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jira — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.jtab-bar{{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}}
+.jtab{{padding:7px 16px;border-radius:20px;border:1px solid #252836;background:#1a1c24;color:#8892b0;font-size:12px;cursor:pointer;transition:all .2s}}
+.jtab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.issue-row{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:12px 14px;margin-bottom:7px;display:flex;gap:10px;align-items:flex-start}}
+.issue-row:hover{{border-color:#3a4060}}
+.issue-key{{font-size:11px;font-weight:700;color:#64ffda;flex-shrink:0;min-width:80px;padding-top:2px}}
+.issue-title{{font-size:13px;color:#d4d8e8;flex:1;min-width:0}}
+.issue-meta{{font-size:11px;color:#8892b0;margin-top:4px;display:flex;gap:8px;flex-wrap:wrap}}
+.prio-highest{{color:#ff5555}}.prio-high{{color:#ffb86c}}.prio-medium{{color:#f1fa8c}}.prio-low{{color:#8892b0}}
+.proj-card{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:14px;display:flex;gap:10px;align-items:center}}
+.proj-card:hover{{border-color:#3a4060}}
+.conf-item{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:12px 14px;margin-bottom:7px}}
+.conf-item:hover{{border-color:#3a4060}}
+.conf-title{{font-size:13px;color:#d4d8e8;margin-bottom:4px}}
+.conf-meta{{font-size:11px;color:#8892b0}}
+.search-bar{{display:flex;gap:8px;margin-bottom:14px}}
+.search-bar input{{flex:1;background:#1a1c24;border:1px solid #252836;border-radius:6px;padding:8px 12px;color:#d4d8e8;font-size:13px}}
+.search-bar input:focus{{outline:none;border-color:#64ffda}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">📋 Jira / Confluence</div><div class="page-subtitle">Issues, projects and knowledge pages</div></div>
+    <button class="btn btn-primary" onclick="loadAll()">↻ Refresh</button>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="s-open">—</div><div class="stat-lbl">My Open</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-inprog" style="color:#ffb86c">—</div><div class="stat-lbl">In Progress</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-proj" style="color:#64ffda">—</div><div class="stat-lbl">Projects</div></div>
+  </div>
+  <div class="jtab-bar">
+    <button class="jtab active" onclick="showJTab('issues',this)">🐛 My Issues</button>
+    <button class="jtab" onclick="showJTab('projects',this)">📁 Projects</button>
+    <button class="jtab" onclick="showJTab('confluence',this)">📖 Confluence</button>
+  </div>
+  <div id="jtab-issues"></div>
+  <div id="jtab-projects" style="display:none"></div>
+  <div id="jtab-confluence" style="display:none">
+    <div class="search-bar">
+      <input id="conf-q" placeholder="Search Confluence…" onkeydown="if(event.key==='Enter')searchConf()">
+      <button class="btn btn-primary" onclick="searchConf()">Search</button>
+    </div>
+    <div id="conf-results"></div>
+  </div>
+</div>
+<script>
+function showJTab(name,el){{
+  ['issues','projects','confluence'].forEach(t=>document.getElementById('jtab-'+t).style.display='none');
+  document.querySelectorAll('.jtab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('jtab-'+name).style.display='';
+  el.classList.add('active');
+}}
+function prioClass(p){{
+  const m={{Highest:'prio-highest',High:'prio-high',Medium:'prio-medium',Low:'prio-low'}};
+  return m[p]||'prio-low';
+}}
+function issueRow(i){{
+  return `<div class="issue-row">
+    <div class="issue-key">${{escH(i.key||'')}}</div>
+    <div style="flex:1;min-width:0">
+      <div class="issue-title">${{escH(i.summary||i.title||'')}}</div>
+      <div class="issue-meta">
+        <span>${{escH(i.status||'')}}</span>
+        ${{i.priority?`<span class="${{prioClass(i.priority)}}">${{escH(i.priority)}}</span>`:''}}
+        ${{i.type?`<span>${{escH(i.type)}}</span>`:''}}
+        ${{i.project?`<span>${{escH(i.project)}}</span>`:''}}
+      </div>
+    </div>
+  </div>`;
+}}
+function projCard(p){{
+  return `<div class="proj-card" style="margin-bottom:7px">
+    <div style="font-size:20px">📁</div>
+    <div><div style="font-size:13px;font-weight:600;color:#d4d8e8">${{escH(p.name||'')}}</div>
+    <div style="font-size:11px;color:#8892b0">${{escH(p.key||'')}}&nbsp;·&nbsp;${{escH(p.type||'')}}</div></div>
+  </div>`;
+}}
+async function loadAll(){{
+  // Issues
+  try{{
+    const r=await fetch('/jira/issues'); const d=await r.json();
+    const issues=d.issues||[];
+    const open=issues.filter(i=>i.status&&!['Done','Closed','Resolved'].includes(i.status));
+    const inprog=issues.filter(i=>i.status&&i.status.toLowerCase().includes('progress'));
+    document.getElementById('s-open').textContent=open.length;
+    document.getElementById('s-inprog').textContent=inprog.length;
+    document.getElementById('jtab-issues').innerHTML=issues.length?issues.map(issueRow).join(''):'<div class="empty-msg">No issues assigned ✓</div>';
+  }}catch(e){{document.getElementById('jtab-issues').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+  // Projects
+  try{{
+    const r=await fetch('/jira/projects'); const d=await r.json();
+    const projs=d.projects||[];
+    document.getElementById('s-proj').textContent=projs.length;
+    document.getElementById('jtab-projects').innerHTML=projs.length?projs.map(projCard).join(''):'<div class="empty-msg">No projects found</div>';
+  }}catch(e){{document.getElementById('jtab-projects').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+async function searchConf(){{
+  const q=document.getElementById('conf-q').value.trim();
+  if(!q)return;
+  document.getElementById('conf-results').innerHTML='<div class="empty-msg">Searching…</div>';
+  try{{
+    const r=await fetch('/confluence/search?q='+encodeURIComponent(q)); const d=await r.json();
+    const pages=d.pages||[];
+    document.getElementById('conf-results').innerHTML=pages.length?pages.map(p=>`
+      <div class="conf-item">
+        <div class="conf-title">${{escH(p.title||'')}}</div>
+        <div class="conf-meta">${{escH(p.space||'')}}&nbsp;·&nbsp;${{escH(p.last_modified||'')}}</div>
+      </div>`).join(''):'<div class="empty-msg">No pages found</div>';
+  }}catch(e){{document.getElementById('conf-results').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadAll();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LINEAR — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/linear/issues")
+def api_linear_issues():
+    state = request.args.get("state")
+    try:
+        from tools import linear_tool
+        return jsonify({"issues": linear_tool.get_my_linear_issues(state_type=state or None, max_count=30)})
+    except Exception as e:
+        return jsonify({"issues": [], "error": str(e)})
+
+@app.route("/linear/teams")
+def api_linear_teams():
+    try:
+        from tools import linear_tool
+        return jsonify({"teams": linear_tool.list_linear_teams()})
+    except Exception as e:
+        return jsonify({"teams": [], "error": str(e)})
+
+@app.route("/linear/projects")
+def api_linear_projects():
+    try:
+        from tools import linear_tool
+        return jsonify({"projects": linear_tool.list_linear_projects()})
+    except Exception as e:
+        return jsonify({"projects": [], "error": str(e)})
+
+@app.route("/linear-page")
+def linear_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Linear — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.ltab-bar{{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}}
+.ltab{{padding:7px 16px;border-radius:20px;border:1px solid #252836;background:#1a1c24;color:#8892b0;font-size:12px;cursor:pointer;transition:all .2s}}
+.ltab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.li-row{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:12px 14px;margin-bottom:7px;display:flex;gap:10px;align-items:flex-start}}
+.li-row:hover{{border-color:#3a4060}}
+.li-id{{font-size:11px;color:#8892b0;flex-shrink:0;min-width:60px;padding-top:2px}}
+.li-title{{font-size:13px;color:#d4d8e8;flex:1;min-width:0}}
+.li-meta{{font-size:11px;color:#8892b0;margin-top:4px;display:flex;gap:8px;flex-wrap:wrap}}
+.prio-urgent{{color:#ff5555}}.prio-high{{color:#ffb86c}}.prio-medium{{color:#f1fa8c}}.prio-low{{color:#8892b0}}
+.state-pill{{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#1c2540;color:#64ffda}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">⚡ Linear</div><div class="page-subtitle">Issues, teams and projects</div></div>
+    <button class="btn btn-primary" onclick="loadAll()">↻ Refresh</button>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="s-total">—</div><div class="stat-lbl">My Issues</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-inprog" style="color:#ffb86c">—</div><div class="stat-lbl">In Progress</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-todo" style="color:#64ffda">—</div><div class="stat-lbl">To Do</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-teams" style="color:#bd93f9">—</div><div class="stat-lbl">Teams</div></div>
+  </div>
+  <div class="ltab-bar">
+    <button class="ltab active" onclick="showLTab('issues',this)">📋 My Issues</button>
+    <button class="ltab" onclick="showLTab('teams',this)">👥 Teams</button>
+    <button class="ltab" onclick="showLTab('projects',this)">🗂 Projects</button>
+  </div>
+  <div id="ltab-issues"></div>
+  <div id="ltab-teams" style="display:none"></div>
+  <div id="ltab-projects" style="display:none"></div>
+</div>
+<script>
+function showLTab(name,el){{
+  ['issues','teams','projects'].forEach(t=>document.getElementById('ltab-'+t).style.display='none');
+  document.querySelectorAll('.ltab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('ltab-'+name).style.display='';
+  el.classList.add('active');
+}}
+function prioIcon(p){{const m={{urgent:'🔴',high:'🟠',medium:'🟡',low:'🟢',none:'⚪'}};return m[String(p||'').toLowerCase()]||'⚪';}}
+function liRow(i){{
+  return `<div class="li-row">
+    <div class="li-id">${{escH(i.identifier||i.id||'')}}</div>
+    <div style="flex:1;min-width:0">
+      <div class="li-title">${{escH(i.title||'')}}</div>
+      <div class="li-meta">
+        ${{i.state?`<span class="state-pill">${{escH(i.state)}}</span>`:''}}
+        ${{i.priority_label||i.priority?`<span>${{prioIcon(i.priority_label||i.priority)}} ${{escH(i.priority_label||String(i.priority||''))}}</span>`:''}}
+        ${{i.team?`<span>${{escH(i.team)}}</span>`:''}}
+        ${{i.estimate?`<span>${{i.estimate}}pts</span>`:''}}
+      </div>
+    </div>
+  </div>`;
+}}
+function teamCard(t){{
+  return `<div style="background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:14px;margin-bottom:7px;display:flex;gap:10px;align-items:center">
+    <div style="font-size:20px">👥</div>
+    <div><div style="font-size:13px;font-weight:600;color:#d4d8e8">${{escH(t.name||'')}}</div>
+    <div style="font-size:11px;color:#8892b0">${{escH(t.key||'')}}</div></div>
+  </div>`;
+}}
+function projCard(p){{
+  return `<div style="background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:14px;margin-bottom:7px">
+    <div style="font-size:13px;font-weight:600;color:#d4d8e8;margin-bottom:4px">${{escH(p.name||'')}}</div>
+    <div style="font-size:11px;color:#8892b0">${{escH(p.state||'')}}&nbsp;·&nbsp;${{escH(p.team||'')}}</div>
+  </div>`;
+}}
+async function loadAll(){{
+  try{{
+    const r=await fetch('/linear/issues'); const d=await r.json();
+    const issues=d.issues||[];
+    const inprog=issues.filter(i=>String(i.state||'').toLowerCase().includes('progress'));
+    const todo=issues.filter(i=>String(i.state||'').toLowerCase().includes('todo')||String(i.state||'').toLowerCase().includes('backlog'));
+    document.getElementById('s-total').textContent=issues.length;
+    document.getElementById('s-inprog').textContent=inprog.length;
+    document.getElementById('s-todo').textContent=todo.length;
+    document.getElementById('ltab-issues').innerHTML=issues.length?issues.map(liRow).join(''):'<div class="empty-msg">No issues assigned ✓</div>';
+  }}catch(e){{document.getElementById('ltab-issues').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+  try{{
+    const r=await fetch('/linear/teams'); const d=await r.json();
+    const teams=d.teams||[];
+    document.getElementById('s-teams').textContent=teams.length;
+    document.getElementById('ltab-teams').innerHTML=teams.length?teams.map(teamCard).join(''):'<div class="empty-msg">No teams found</div>';
+  }}catch(e){{document.getElementById('ltab-teams').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+  try{{
+    const r=await fetch('/linear/projects'); const d=await r.json();
+    const projs=d.projects||[];
+    document.getElementById('ltab-projects').innerHTML=projs.length?projs.map(projCard).join(''):'<div class="empty-msg">No projects found</div>';
+  }}catch(e){{document.getElementById('ltab-projects').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadAll();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SLACK — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/slack/channels")
+def api_slack_channels():
+    try:
+        from tools import slack_tool
+        return jsonify({"channels": slack_tool.list_slack_channels(max_count=50)})
+    except Exception as e:
+        return jsonify({"channels": [], "error": str(e)})
+
+@app.route("/slack/messages")
+def api_slack_messages():
+    channel_id = request.args.get("channel_id", "")
+    try:
+        from tools import slack_tool
+        return jsonify({"messages": slack_tool.get_slack_messages(channel_id, max_count=30)})
+    except Exception as e:
+        return jsonify({"messages": [], "error": str(e)})
+
+@app.route("/slack/dms")
+def api_slack_dms():
+    try:
+        from tools import slack_tool
+        return jsonify({"dms": slack_tool.list_slack_dms(max_count=20)})
+    except Exception as e:
+        return jsonify({"dms": [], "error": str(e)})
+
+@app.route("/slack/send", methods=["POST"])
+def api_slack_send():
+    data = request.get_json() or {}
+    try:
+        from tools import slack_tool
+        result = slack_tool.send_slack_message(
+            channel_id=data.get("channel_id", ""),
+            message=data.get("message", ""),
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/slack-page")
+def slack_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Slack — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.slack-layout{{display:grid;grid-template-columns:260px 1fr;gap:16px;height:calc(100vh - 180px)}}
+.slack-sidebar{{background:#1a1c24;border:1px solid #252836;border-radius:10px;overflow-y:auto;padding:8px 0}}
+.slack-main{{background:#1a1c24;border:1px solid #252836;border-radius:10px;display:flex;flex-direction:column}}
+.ch-item{{padding:8px 14px;cursor:pointer;font-size:13px;color:#8892b0;border-radius:6px;margin:0 6px;display:flex;gap:8px;align-items:center}}
+.ch-item:hover{{background:#1e2028;color:#d4d8e8}}
+.ch-item.active{{background:#1c2540;color:#64ffda}}
+.ch-hash{{color:#8892b0;font-size:14px}}
+.msg-list{{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}}
+.msg-bubble{{display:flex;gap:10px;align-items:flex-start}}
+.msg-avatar{{width:32px;height:32px;border-radius:8px;background:#1c2540;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}}
+.msg-body{{flex:1;min-width:0}}
+.msg-user{{font-size:12px;font-weight:700;color:#64ffda}}
+.msg-time{{font-size:11px;color:#8892b0;margin-left:8px}}
+.msg-text{{font-size:13px;color:#d4d8e8;margin-top:3px;word-break:break-word}}
+.send-bar{{padding:12px;border-top:1px solid #252836;display:flex;gap:8px}}
+.send-bar input{{flex:1;background:#12131a;border:1px solid #252836;border-radius:6px;padding:8px 12px;color:#d4d8e8;font-size:13px}}
+.send-bar input:focus{{outline:none;border-color:#64ffda}}
+.slack-hdr{{padding:12px 14px;border-bottom:1px solid #252836;font-size:13px;font-weight:700;color:#d4d8e8;display:flex;justify-content:space-between;align-items:center}}
+.tab-row{{display:flex;gap:6px;padding:8px 8px 0}}
+.stab{{padding:5px 12px;border-radius:16px;border:1px solid #252836;background:#12131a;color:#8892b0;font-size:11px;cursor:pointer}}
+.stab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap" style="padding-bottom:0">
+  <div class="page-hdr">
+    <div><div class="page-title">💬 Slack</div><div class="page-subtitle">Channels, DMs and messages</div></div>
+  </div>
+  <div class="tab-row" style="margin-bottom:12px">
+    <button class="stab active" onclick="loadChannels(this)">📢 Channels</button>
+    <button class="stab" onclick="loadDMs(this)">💬 Direct Messages</button>
+  </div>
+  <div class="slack-layout">
+    <div class="slack-sidebar" id="ch-list"><div class="empty-msg">Loading…</div></div>
+    <div class="slack-main">
+      <div class="slack-hdr"><span id="ch-name">Select a channel</span><button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836;font-size:11px" onclick="refreshMsgs()">↻</button></div>
+      <div class="msg-list" id="msg-list"><div class="empty-msg">Pick a channel to see messages</div></div>
+      <div class="send-bar">
+        <input id="send-input" placeholder="Send a message…" onkeydown="if(event.key==='Enter')sendMsg()">
+        <button class="btn btn-primary" onclick="sendMsg()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let _activeCh=null; let _activeChName='';
+function renderChannelList(items, isDM){{
+  const list=document.getElementById('ch-list');
+  if(!items.length){{list.innerHTML='<div class="empty-msg">None found</div>';return;}}
+  list.innerHTML=items.map(c=>{{
+    const icon=isDM?'👤':'#';
+    const name=isDM?(c.user_name||c.name||c.id):( c.name||c.id);
+    return `<div class="ch-item" id="ch-${{c.id}}" onclick="selectChannel('${{c.id}}','${{escH(name)}}')">
+      <span class="ch-hash">${{icon}}</span><span>${{escH(name)}}</span>
+      ${{c.unread_count?`<span style="margin-left:auto;background:#ff5555;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px">${{c.unread_count}}</span>`:''}}
+    </div>`;
+  }}).join('');
+}}
+async function loadChannels(el){{
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('ch-list').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/slack/channels'); const d=await r.json();
+    renderChannelList(d.channels||[], false);
+  }}catch(e){{document.getElementById('ch-list').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+async function loadDMs(el){{
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('ch-list').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/slack/dms'); const d=await r.json();
+    renderChannelList(d.dms||[], true);
+  }}catch(e){{document.getElementById('ch-list').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+async function selectChannel(id, name){{
+  _activeCh=id; _activeChName=name;
+  document.querySelectorAll('.ch-item').forEach(el=>el.classList.remove('active'));
+  const el=document.getElementById('ch-'+id);
+  if(el)el.classList.add('active');
+  document.getElementById('ch-name').textContent=name;
+  await refreshMsgs();
+}}
+async function refreshMsgs(){{
+  if(!_activeCh)return;
+  document.getElementById('msg-list').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/slack/messages?channel_id='+encodeURIComponent(_activeCh));
+    const d=await r.json();
+    const msgs=(d.messages||[]).reverse();
+    const list=document.getElementById('msg-list');
+    list.innerHTML=msgs.length?msgs.map(m=>{{
+      const user=escH(m.user_name||m.user||'?');
+      const text=escH(m.text||'');
+      const time=m.timestamp?new Date(parseFloat(m.timestamp)*1000).toLocaleTimeString('en-GB',{{hour:'2-digit',minute:'2-digit'}}):'';
+      return `<div class="msg-bubble"><div class="msg-avatar">${{user[0]||'?'}}</div>
+        <div class="msg-body">
+          <div><span class="msg-user">${{user}}</span><span class="msg-time">${{time}}</span></div>
+          <div class="msg-text">${{text}}</div>
+        </div></div>`;
+    }}).join(''):'<div class="empty-msg">No messages</div>';
+    list.scrollTop=list.scrollHeight;
+  }}catch(e){{document.getElementById('msg-list').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+async function sendMsg(){{
+  if(!_activeCh){{alert('Select a channel first');return;}}
+  const inp=document.getElementById('send-input');
+  const msg=inp.value.trim();
+  if(!msg)return;
+  inp.value='';
+  try{{
+    const r=await fetch('/slack/send',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{channel_id:_activeCh,message:msg}})}});
+    const d=await r.json();
+    if(d.status==='error'){{alert('Send failed: '+d.message);inp.value=msg;return;}}
+    await refreshMsgs();
+  }}catch(e){{alert('Error: '+e.message);inp.value=msg;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadChannels(document.querySelector('.stab'));
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NOTION — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/notion/search")
+def api_notion_search():
+    q = request.args.get("q", "")
+    try:
+        from tools import notion_tool
+        return jsonify({"pages": notion_tool.search_notion(q, max_results=20)})
+    except Exception as e:
+        return jsonify({"pages": [], "error": str(e)})
+
+@app.route("/notion/page/<page_id>")
+def api_notion_page(page_id):
+    try:
+        from tools import notion_tool
+        return jsonify(notion_tool.get_notion_page(page_id))
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route("/notion-page")
+def notion_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notion — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.notion-search{{display:flex;gap:8px;margin-bottom:16px}}
+.notion-search input{{flex:1;background:#1a1c24;border:1px solid #252836;border-radius:6px;padding:9px 14px;color:#d4d8e8;font-size:13px}}
+.notion-search input:focus{{outline:none;border-color:#64ffda}}
+.page-item{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:14px 16px;margin-bottom:8px;cursor:pointer;display:flex;gap:10px;align-items:flex-start}}
+.page-item:hover{{border-color:#3a4060}}
+.page-icon{{font-size:20px;flex-shrink:0}}
+.page-title{{font-size:13px;font-weight:600;color:#d4d8e8}}
+.page-meta{{font-size:11px;color:#8892b0;margin-top:4px;display:flex;gap:8px}}
+.page-content{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:16px;margin-top:12px;display:none}}
+.page-content h2{{color:#64ffda;font-size:14px;margin:0 0 10px}}
+.page-content pre{{white-space:pre-wrap;font-size:12px;color:#d4d8e8;font-family:inherit;line-height:1.6}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">📓 Notion</div><div class="page-subtitle">Search and browse your workspace pages</div></div>
+  </div>
+  <div class="notion-search">
+    <input id="notion-q" placeholder="Search pages, docs, wikis…" onkeydown="if(event.key==='Enter')searchNotion()">
+    <button class="btn btn-primary" onclick="searchNotion()">Search</button>
+    <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836" onclick="searchNotion(true)">Browse Recent</button>
+  </div>
+  <div id="notion-results"><div class="empty-msg">Type above to search your Notion workspace</div></div>
+  <div class="page-content" id="page-viewer">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h2 id="pv-title">Page</h2>
+      <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836;font-size:11px" onclick="document.getElementById('page-viewer').style.display='none'">✕ Close</button>
+    </div>
+    <pre id="pv-content"></pre>
+  </div>
+</div>
+<script>
+async function searchNotion(recent){{
+  const q=recent?'':document.getElementById('notion-q').value.trim();
+  const el=document.getElementById('notion-results');
+  el.innerHTML='<div class="empty-msg">Searching…</div>';
+  try{{
+    const r=await fetch('/notion/search?q='+encodeURIComponent(q||''));
+    const d=await r.json();
+    const pages=d.pages||[];
+    el.innerHTML=pages.length?pages.map(p=>{{
+      const icon=p.icon||'📄';
+      return `<div class="page-item" onclick="openPage('${{p.id}}','${{escH(p.title||'')}}')">
+        <div class="page-icon">${{icon}}</div>
+        <div>
+          <div class="page-title">${{escH(p.title||'Untitled')}}</div>
+          <div class="page-meta">
+            ${{p.type?`<span>${{escH(p.type)}}</span>`:''}}
+            ${{p.last_edited?`<span>📅 ${{escH(p.last_edited.slice(0,10))}} </span>`:''}}
+            ${{p.workspace?`<span>${{escH(p.workspace)}}</span>`:''}}
+          </div>
+        </div>
+      </div>`;
+    }}).join(''):'<div class="empty-msg">No pages found</div>';
+  }}catch(e){{el.innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+async function openPage(id, title){{
+  const viewer=document.getElementById('page-viewer');
+  const content=document.getElementById('pv-content');
+  document.getElementById('pv-title').textContent=title;
+  content.textContent='Loading…';
+  viewer.style.display='block';
+  viewer.scrollIntoView({{behavior:'smooth'}});
+  try{{
+    const r=await fetch('/notion/page/'+id);
+    const d=await r.json();
+    content.textContent=d.content||d.text||JSON.stringify(d,null,2);
+  }}catch(e){{content.textContent='Error: '+e.message;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MEETINGS (ZOOM + GOOGLE MEET) — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/zoom/meetings")
+def api_zoom_meetings():
+    try:
+        from tools import zoom_meet
+        return jsonify({"meetings": zoom_meet.list_zoom_meetings(meeting_type="upcoming")})
+    except Exception as e:
+        return jsonify({"meetings": [], "error": str(e)})
+
+@app.route("/zoom/recordings")
+def api_zoom_recordings():
+    try:
+        from tools import zoom_meet
+        return jsonify({"recordings": zoom_meet.list_zoom_recordings(days_back=14)})
+    except Exception as e:
+        return jsonify({"recordings": [], "error": str(e)})
+
+@app.route("/gcal/events")
+def api_gcal_events():
+    try:
+        from tools import zoom_meet
+        return jsonify({"events": zoom_meet.list_google_calendar_events(days_ahead=7)})
+    except Exception as e:
+        return jsonify({"events": [], "error": str(e)})
+
+@app.route("/meetings-page")
+def meetings_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meetings — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.mtab-bar{{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}}
+.mtab{{padding:7px 16px;border-radius:20px;border:1px solid #252836;background:#1a1c24;color:#8892b0;font-size:12px;cursor:pointer;transition:all .2s}}
+.mtab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.meeting-card{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:14px 16px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start}}
+.meeting-card:hover{{border-color:#3a4060}}
+.meeting-icon{{font-size:24px;flex-shrink:0}}
+.meeting-title{{font-size:13px;font-weight:600;color:#d4d8e8;margin-bottom:5px}}
+.meeting-meta{{font-size:11px;color:#8892b0;display:flex;gap:10px;flex-wrap:wrap}}
+.join-btn{{padding:5px 12px;border-radius:6px;border:none;background:#1c2540;color:#64ffda;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap}}
+.join-btn:hover{{background:#22304a}}
+.rec-card{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:12px 14px;margin-bottom:7px}}
+.rec-title{{font-size:13px;color:#d4d8e8;margin-bottom:4px}}
+.rec-meta{{font-size:11px;color:#8892b0;display:flex;gap:8px}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">📹 Meetings</div><div class="page-subtitle">Zoom meetings, Google Calendar events and recordings</div></div>
+    <button class="btn btn-primary" onclick="loadAll()">↻ Refresh</button>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="s-zoom">—</div><div class="stat-lbl">Zoom Upcoming</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-gcal" style="color:#64ffda">—</div><div class="stat-lbl">GCal Events</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-rec" style="color:#bd93f9">—</div><div class="stat-lbl">Recordings</div></div>
+  </div>
+  <div class="mtab-bar">
+    <button class="mtab active" onclick="showMTab('zoom',this)">📹 Zoom</button>
+    <button class="mtab" onclick="showMTab('gcal',this)">📅 Google Calendar</button>
+    <button class="mtab" onclick="showMTab('recordings',this)">🎬 Recordings</button>
+  </div>
+  <div id="mtab-zoom"></div>
+  <div id="mtab-gcal" style="display:none"></div>
+  <div id="mtab-recordings" style="display:none"></div>
+</div>
+<script>
+function showMTab(name,el){{
+  ['zoom','gcal','recordings'].forEach(t=>document.getElementById('mtab-'+t).style.display='none');
+  document.querySelectorAll('.mtab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('mtab-'+name).style.display='';
+  el.classList.add('active');
+}}
+function fmtDT(s){{if(!s)return'';try{{return new Date(s).toLocaleString('en-GB',{{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}});}}catch{{return s;}}}}
+function meetCard(m){{
+  const joinBtn=m.join_url?`<button class="join-btn" onclick="window.open('${{m.join_url}}','_blank')">🔗 Join</button>`:'';
+  return `<div class="meeting-card">
+    <div class="meeting-icon">📹</div>
+    <div style="flex:1;min-width:0">
+      <div class="meeting-title">${{escH(m.topic||m.title||'Meeting')}}</div>
+      <div class="meeting-meta">
+        ${{m.start_time?`<span>🕐 ${{fmtDT(m.start_time)}}</span>`:''}}
+        ${{m.duration?`<span>⏱ ${{m.duration}}min</span>`:''}}
+        ${{m.host?`<span>👤 ${{escH(m.host)}}</span>`:''}}
+      </div>
+    </div>
+    ${{joinBtn}}
+  </div>`;
+}}
+function gcalCard(e){{
+  const joinBtn=e.meeting_link?`<button class="join-btn" onclick="window.open('${{e.meeting_link}}','_blank')">🔗 Join</button>`:'';
+  return `<div class="meeting-card">
+    <div class="meeting-icon">📅</div>
+    <div style="flex:1;min-width:0">
+      <div class="meeting-title">${{escH(e.title||e.summary||'Event')}}</div>
+      <div class="meeting-meta">
+        ${{e.start?`<span>🕐 ${{fmtDT(e.start)}}</span>`:''}}
+        ${{e.attendees&&e.attendees.length?`<span>👥 ${{e.attendees.length}} attendees</span>`:''}}
+        ${{e.location?`<span>📍 ${{escH(e.location)}}</span>`:''}}
+      </div>
+    </div>
+    ${{joinBtn}}
+  </div>`;
+}}
+function recCard(r){{
+  const playBtn=r.play_url?`<button class="join-btn" onclick="window.open('${{r.play_url}}','_blank')">▶ Play</button>`:'';
+  return `<div class="rec-card">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div>
+        <div class="rec-title">${{escH(r.topic||r.title||'Recording')}}</div>
+        <div class="rec-meta">
+          ${{r.start_time?`<span>📅 ${{fmtDT(r.start_time)}}</span>`:''}}
+          ${{r.duration?`<span>⏱ ${{r.duration}}min</span>`:''}}
+          ${{r.file_size?`<span>${{(r.file_size/1048576).toFixed(1)}}MB</span>`:''}}
+        </div>
+      </div>
+      ${{playBtn}}
+    </div>
+  </div>`;
+}}
+async function loadAll(){{
+  try{{const r=await fetch('/zoom/meetings');const d=await r.json();const m=d.meetings||[];document.getElementById('s-zoom').textContent=m.length;document.getElementById('mtab-zoom').innerHTML=m.length?m.map(meetCard).join(''):'<div class="empty-msg">No upcoming Zoom meetings</div>';}}catch(e){{document.getElementById('mtab-zoom').innerHTML=`<div class="empty-msg" style="color:#ff5555">Zoom: ${{e.message}}</div>`;}}
+  try{{const r=await fetch('/gcal/events');const d=await r.json();const ev=d.events||[];document.getElementById('s-gcal').textContent=ev.length;document.getElementById('mtab-gcal').innerHTML=ev.length?ev.map(gcalCard).join(''):'<div class="empty-msg">No upcoming Google Calendar events</div>';}}catch(e){{document.getElementById('mtab-gcal').innerHTML=`<div class="empty-msg" style="color:#ff5555">Google Calendar: ${{e.message}}</div>`;}}
+  try{{const r=await fetch('/zoom/recordings');const d=await r.json();const rec=d.recordings||[];document.getElementById('s-rec').textContent=rec.length;document.getElementById('mtab-recordings').innerHTML=rec.length?rec.map(recCard).join(''):'<div class="empty-msg">No recent recordings</div>';}}catch(e){{document.getElementById('mtab-recordings').innerHTML=`<div class="empty-msg" style="color:#ff5555">Recordings: ${{e.message}}</div>`;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadAll();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ANALYTICS — FULL PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/analytics-page")
+def analytics_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Analytics — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.an-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:20px}}
+.an-card{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:16px}}
+.an-card h3{{font-size:12px;font-weight:700;color:#8892b0;letter-spacing:.5px;text-transform:uppercase;margin:0 0 12px}}
+.bar-row{{display:flex;align-items:center;gap:8px;margin-bottom:6px}}
+.bar-label{{font-size:12px;color:#8892b0;width:100px;flex-shrink:0;text-align:right}}
+.bar-track{{flex:1;background:#12131a;border-radius:3px;height:8px;overflow:hidden}}
+.bar-fill{{height:100%;background:#64ffda;border-radius:3px;transition:width .4s}}
+.bar-val{{font-size:11px;color:#64ffda;width:32px;text-align:right}}
+.big-num{{font-size:36px;font-weight:800;color:#64ffda}}
+.big-lbl{{font-size:12px;color:#8892b0;margin-top:4px}}
+.tool-tag{{display:inline-block;padding:3px 10px;border-radius:12px;background:#1c2540;color:#64ffda;font-size:11px;margin:3px 2px;border:1px solid #243060}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">📊 Analytics</div><div class="page-subtitle">Your work patterns and agent usage over time</div></div>
+    <div style="display:flex;gap:8px">
+      <select id="days-sel" style="background:#1a1c24;border:1px solid #252836;color:#d4d8e8;padding:6px 10px;border-radius:6px;font-size:12px" onchange="loadAnalytics()">
+        <option value="7">Last 7 days</option>
+        <option value="14">Last 14 days</option>
+        <option value="30">Last 30 days</option>
+      </select>
+      <button class="btn btn-primary" onclick="loadAnalytics()">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="a-total">—</div><div class="stat-lbl">Total Requests</div></div>
+    <div class="stat-card"><div class="stat-num" id="a-tools" style="color:#ffb86c">—</div><div class="stat-lbl">Tools Used</div></div>
+    <div class="stat-card"><div class="stat-num" id="a-avg" style="color:#64ffda">—</div><div class="stat-lbl">Avg/Day</div></div>
+    <div class="stat-card"><div class="stat-num" id="a-peak" style="color:#bd93f9">—</div><div class="stat-lbl">Peak Hour</div></div>
+  </div>
+  <div class="an-grid">
+    <div class="an-card" style="grid-column:span 2">
+      <h3>Tool Usage</h3>
+      <div id="tool-bars"><div class="empty-msg">Loading…</div></div>
+    </div>
+    <div class="an-card">
+      <h3>Hourly Activity</h3>
+      <div id="hour-bars"><div class="empty-msg">Loading…</div></div>
+    </div>
+    <div class="an-card">
+      <h3>Top Queries</h3>
+      <div id="top-queries"><div class="empty-msg">Loading…</div></div>
+    </div>
+    <div class="an-card">
+      <h3>Tools Accessed</h3>
+      <div id="tool-tags"><div class="empty-msg">Loading…</div></div>
+    </div>
+  </div>
+</div>
+<script>
+async function loadAnalytics(){{
+  const days=document.getElementById('days-sel').value;
+  try{{
+    const r=await fetch('/analytics?days_back='+days);
+    const d=await r.json();
+    const s=d.summary||d||{{}};
+    document.getElementById('a-total').textContent=s.total_requests||s.total_interactions||0;
+    document.getElementById('a-tools').textContent=Object.keys(s.tool_usage||s.tools||{{}}).length;
+    const avg=s.avg_per_day||(s.total_requests?Math.round(s.total_requests/parseInt(days)):0);
+    document.getElementById('a-avg').textContent=avg||'—';
+    // Peak hour
+    const hours=s.hourly_activity||s.by_hour||{{}};
+    const peakH=Object.entries(hours).sort((a,b)=>b[1]-a[1])[0];
+    document.getElementById('a-peak').textContent=peakH?peakH[0]+':00':'—';
+    // Tool bars
+    const tools=s.tool_usage||s.tools||{{}};
+    const toolEntries=Object.entries(tools).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    const maxT=toolEntries[0]?toolEntries[0][1]:1;
+    document.getElementById('tool-bars').innerHTML=toolEntries.length?toolEntries.map(([k,v])=>
+      `<div class="bar-row"><div class="bar-label" title="${{k}}">${{k.slice(-12)}}</div><div class="bar-track"><div class="bar-fill" style="width:${{Math.round(v/maxT*100)}}%"></div></div><div class="bar-val">${{v}}</div></div>`
+    ).join(''):'<div class="empty-msg">No data yet</div>';
+    // Tool tags
+    document.getElementById('tool-tags').innerHTML=toolEntries.length?toolEntries.map(([k])=>`<span class="tool-tag">${{k}}</span>`).join(''):'<div class="empty-msg">No data</div>';
+    // Hour bars
+    const hourEntries=Object.entries(hours).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+    const maxH=hourEntries.length?Math.max(...hourEntries.map(([,v])=>v)):1;
+    document.getElementById('hour-bars').innerHTML=hourEntries.length?hourEntries.map(([h,v])=>
+      `<div class="bar-row"><div class="bar-label">${{String(h).padStart(2,'0')}}:00</div><div class="bar-track"><div class="bar-fill" style="width:${{Math.round(v/maxH*100)}}%"></div></div><div class="bar-val">${{v}}</div></div>`
+    ).join(''):'<div class="empty-msg">No hourly data</div>';
+    // Top queries
+    const queries=s.top_queries||s.recent_queries||[];
+    document.getElementById('top-queries').innerHTML=queries.length?queries.slice(0,8).map(q=>
+      `<div style="font-size:12px;color:#d4d8e8;padding:5px 0;border-bottom:1px solid #1e2028">${{escH(typeof q==='string'?q:q.query||JSON.stringify(q))}}</div>`
+    ).join(''):'<div class="empty-msg">No queries logged</div>';
+  }}catch(e){{document.querySelector('.an-grid').innerHTML=`<div style="grid-column:span 2"><div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div></div>`;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadAnalytics();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE BASE — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/kb")
+def api_kb_list():
+    try:
+        from tools import rag
+        return jsonify({"documents": rag.list_documents(), "stats": rag.kb_stats()})
+    except Exception as e:
+        return jsonify({"documents": [], "error": str(e)})
+
+@app.route("/kb/search")
+def api_kb_search():
+    q = request.args.get("q", "")
+    try:
+        from tools import rag
+        return jsonify(rag.search_knowledge_base(q, max_results=6))
+    except Exception as e:
+        return jsonify({"results": [], "error": str(e)})
+
+@app.route("/kb/<doc_id>", methods=["DELETE"])
+def api_kb_delete(doc_id):
+    try:
+        from tools import rag
+        return jsonify(rag.delete_document(doc_id))
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/kb-page")
+def kb_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Knowledge Base — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.kbtab-bar{{display:flex;gap:6px;margin-bottom:16px}}
+.kbtab{{padding:7px 16px;border-radius:20px;border:1px solid #252836;background:#1a1c24;color:#8892b0;font-size:12px;cursor:pointer;transition:all .2s}}
+.kbtab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.kb-doc{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:12px 14px;margin-bottom:7px;display:flex;align-items:center;gap:10px}}
+.kb-doc:hover{{border-color:#3a4060}}
+.kb-meta{{flex:1;min-width:0}}
+.kb-title{{font-size:13px;font-weight:600;color:#d4d8e8}}
+.kb-sub{{font-size:11px;color:#8892b0;margin-top:3px;display:flex;gap:8px}}
+.kb-del{{padding:5px 10px;border-radius:6px;border:none;background:#1e1e2a;color:#ff5555;font-size:12px;cursor:pointer;flex-shrink:0}}
+.kb-del:hover{{background:#2a1e1e}}
+.search-bar{{display:flex;gap:8px;margin-bottom:14px}}
+.search-bar input{{flex:1;background:#1a1c24;border:1px solid #252836;border-radius:6px;padding:8px 12px;color:#d4d8e8;font-size:13px}}
+.search-bar input:focus{{outline:none;border-color:#64ffda}}
+.res-item{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:12px 14px;margin-bottom:8px}}
+.res-source{{font-size:11px;color:#64ffda;margin-bottom:5px}}
+.res-text{{font-size:12px;color:#d4d8e8;line-height:1.6}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">🧠 Knowledge Base</div><div class="page-subtitle">Uploaded documents and RAG search</div></div>
+    <button class="btn btn-primary" onclick="document.getElementById('kb-upload-input').click()">＋ Upload Document</button>
+    <input type="file" id="kb-upload-input" style="display:none" accept=".pdf,.txt,.md,.docx" onchange="uploadDoc(this)">
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="kb-count">—</div><div class="stat-lbl">Documents</div></div>
+    <div class="stat-card"><div class="stat-num" id="kb-chunks" style="color:#64ffda">—</div><div class="stat-lbl">Chunks</div></div>
+    <div class="stat-card"><div class="stat-num" id="kb-size" style="color:#ffb86c">—</div><div class="stat-lbl">Total Size</div></div>
+  </div>
+  <div class="kbtab-bar">
+    <button class="kbtab active" onclick="showKBTab('docs',this)">📁 Documents</button>
+    <button class="kbtab" onclick="showKBTab('search',this)">🔍 Search KB</button>
+  </div>
+  <div id="kbtab-docs"></div>
+  <div id="kbtab-search" style="display:none">
+    <div class="search-bar">
+      <input id="kb-q" placeholder="Ask a question or search for content…" onkeydown="if(event.key==='Enter')searchKB()">
+      <button class="btn btn-primary" onclick="searchKB()">Search</button>
+    </div>
+    <div id="kb-results"></div>
+  </div>
+</div>
+<script>
+function showKBTab(name,el){{
+  ['docs','search'].forEach(t=>document.getElementById('kbtab-'+t).style.display='none');
+  document.querySelectorAll('.kbtab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('kbtab-'+name).style.display='';
+  el.classList.add('active');
+}}
+async function loadKB(){{
+  try{{
+    const r=await fetch('/kb'); const d=await r.json();
+    const docs=d.documents||[]; const stats=d.stats||{{}};
+    document.getElementById('kb-count').textContent=docs.length;
+    document.getElementById('kb-chunks').textContent=stats.total_chunks||stats.chunks||'—';
+    document.getElementById('kb-size').textContent=stats.total_size||'—';
+    document.getElementById('kbtab-docs').innerHTML=docs.length?docs.map(doc=>
+      `<div class="kb-doc" id="kbdoc-${{doc.id}}">
+        <div style="font-size:22px">📄</div>
+        <div class="kb-meta">
+          <div class="kb-title">${{escH(doc.source||doc.title||doc.id)}}</div>
+          <div class="kb-sub">
+            ${{doc.chunks?`<span>${{doc.chunks}} chunks</span>`:''}}
+            ${{doc.added_at?`<span>📅 ${{doc.added_at.slice(0,10)}}</span>`:''}}
+            ${{doc.size?`<span>${{doc.size}}</span>`:''}}
+          </div>
+        </div>
+        <button class="kb-del" onclick="deleteKB('${{doc.id}}')">🗑 Delete</button>
+      </div>`
+    ).join(''):'<div class="empty-msg">No documents yet. Upload one to get started.</div>';
+  }}catch(e){{document.getElementById('kbtab-docs').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+async function deleteKB(id){{
+  if(!confirm('Delete this document from the knowledge base?'))return;
+  const r=await fetch('/kb/'+encodeURIComponent(id),{{method:'DELETE'}});
+  const d=await r.json();
+  if(d.status==='deleted'||d.status==='ok'){{document.getElementById('kbdoc-'+id)?.remove();}}
+  else alert('Delete failed: '+(d.message||'unknown'));
+}}
+async function uploadDoc(input){{
+  const file=input.files[0]; if(!file)return;
+  const fd=new FormData(); fd.append('file',file);
+  try{{
+    const r=await fetch('/upload-doc',{{method:'POST',body:fd}});
+    const d=await r.json();
+    if(d.error)alert('Upload failed: '+d.error);
+    else{{alert('Uploaded: '+file.name); loadKB();}}
+  }}catch(e){{alert('Error: '+e.message);}}
+  input.value='';
+}}
+async function searchKB(){{
+  const q=document.getElementById('kb-q').value.trim(); if(!q)return;
+  document.getElementById('kb-results').innerHTML='<div class="empty-msg">Searching…</div>';
+  try{{
+    const r=await fetch('/kb/search?q='+encodeURIComponent(q));
+    const d=await r.json();
+    const results=d.results||[];
+    document.getElementById('kb-results').innerHTML=results.length?results.map(res=>
+      `<div class="res-item">
+        <div class="res-source">📄 ${{escH(res.source||res.document||'')}}&nbsp;·&nbsp;Score: ${{res.score?res.score.toFixed(2):'—'}}</div>
+        <div class="res-text">${{escH(res.text||res.content||'')}}</div>
+      </div>`
+    ).join(''):'<div class="empty-msg">No matching content found</div>';
+  }}catch(e){{document.getElementById('kb-results').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadKB();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PROACTIVE ALERTS — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/alerts/status")
+def api_alerts_status():
+    try:
+        from tools import proactive
+        return jsonify(proactive.get_status())
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route("/alerts/toggle/<name>", methods=["POST"])
+def api_alerts_toggle(name):
+    try:
+        from tools import proactive
+        return jsonify(proactive.toggle_alert(name))
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/alerts-page")
+def alerts_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alerts — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.alert-card{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:16px 18px;margin-bottom:10px;display:flex;align-items:center;gap:14px}}
+.alert-card:hover{{border-color:#3a4060}}
+.alert-icon{{font-size:24px;flex-shrink:0}}
+.alert-info{{flex:1;min-width:0}}
+.alert-name{{font-size:13px;font-weight:700;color:#d4d8e8}}
+.alert-desc{{font-size:12px;color:#8892b0;margin-top:3px}}
+.toggle-sw{{position:relative;width:44px;height:24px;flex-shrink:0}}
+.toggle-sw input{{opacity:0;width:0;height:0;position:absolute}}
+.toggle-slider{{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#252836;border-radius:24px;transition:.3s}}
+.toggle-slider:before{{position:absolute;content:'';height:18px;width:18px;left:3px;bottom:3px;background:#8892b0;border-radius:50%;transition:.3s}}
+.toggle-sw input:checked+.toggle-slider{{background:#1c4030}}
+.toggle-sw input:checked+.toggle-slider:before{{transform:translateX(20px);background:#64ffda}}
+.alert-last{{font-size:11px;color:#8892b0;flex-shrink:0;text-align:right;min-width:80px}}
+.running-badge{{padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700;background:#1c4030;color:#64ffda;border:1px solid #1a6040}}
+.stopped-badge{{padding:3px 10px;border-radius:10px;font-size:11px;background:#2a1e1e;color:#ff5555;border:1px solid #4a1e1e}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">🔔 Proactive Alerts</div><div class="page-subtitle">Configure background monitoring and alert rules</div></div>
+    <div id="monitor-status"></div>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="a-enabled">—</div><div class="stat-lbl">Enabled</div></div>
+    <div class="stat-card"><div class="stat-num" id="a-total" style="color:#8892b0">—</div><div class="stat-lbl">Total Alerts</div></div>
+  </div>
+  <div id="alerts-list"><div style="text-align:center;padding:40px;color:#8892b0">Loading…</div></div>
+</div>
+<script>
+const ALERT_ICONS={{
+  urgent_emails:'📧', pr_reviews:'🔀', ci_failures:'❌',
+  meeting_reminders:'📅', linear_blocked:'⚡', jira_overdue:'📋'
+}};
+const ALERT_DESCS={{
+  urgent_emails:'Notifies when high-priority or flagged emails arrive',
+  pr_reviews:'Reminds you when your PR review is requested',
+  ci_failures:'Alerts on GitHub Actions CI/CD pipeline failures',
+  meeting_reminders:'Sends a reminder 5 minutes before calendar events',
+  linear_blocked:'Flags your Linear issues that are marked as blocked',
+  jira_overdue:'Highlights Jira issues past their due date'
+}};
+async function loadAlerts(){{
+  try{{
+    const r=await fetch('/alerts/status'); const d=await r.json();
+    const alerts=d.alerts||{{}};
+    const running=d.monitoring_active||d.running;
+    document.getElementById('monitor-status').innerHTML=running
+      ?'<span class="running-badge">● Monitoring Active</span>'
+      :'<span class="stopped-badge">● Monitoring Stopped</span>';
+    const entries=Object.entries(alerts);
+    document.getElementById('a-total').textContent=entries.length;
+    document.getElementById('a-enabled').textContent=entries.filter(([,v])=>v===true||v?.enabled).length;
+    document.getElementById('alerts-list').innerHTML=entries.length?entries.map(([name,val])=>{{
+      const enabled=val===true||val?.enabled;
+      const icon=ALERT_ICONS[name]||'🔔';
+      const desc=ALERT_DESCS[name]||'Background alert monitor';
+      const lastFired=val?.last_fired?`Last: ${{val.last_fired.slice(0,16)}}`:d.last_run?`Last run: ${{d.last_run.slice(0,16)}}`:' ';
+      return `<div class="alert-card">
+        <div class="alert-icon">${{icon}}</div>
+        <div class="alert-info">
+          <div class="alert-name">${{escH(name.replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase()))}}</div>
+          <div class="alert-desc">${{desc}}</div>
+        </div>
+        <div class="alert-last">${{lastFired}}</div>
+        <label class="toggle-sw" title="${{{{'enabled':'Disable','disabled':'Enable'}}[enabled?'enabled':'disabled']}}">
+          <input type="checkbox" ${{enabled?'checked':''}} onchange="toggleAlert('${{name}}',this)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>`;
+    }}).join(''):'<div style="text-align:center;padding:40px;color:#8892b0">No alerts configured</div>';
+  }}catch(e){{document.getElementById('alerts-list').innerHTML=`<div style="text-align:center;padding:40px;color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+async function toggleAlert(name, checkbox){{
+  try{{
+    const r=await fetch('/alerts/toggle/'+name,{{method:'POST'}});
+    const d=await r.json();
+    if(d.status==='error'){{alert('Failed: '+d.message);checkbox.checked=!checkbox.checked;}}
+    else loadAlerts();
+  }}catch(e){{alert('Error: '+e.message);checkbox.checked=!checkbox.checked;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadAlerts();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GUARDRAILS — FULL PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/guardrails-page")
+def guardrails_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Guardrails — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.gr-card{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:18px 20px;margin-bottom:12px;display:flex;align-items:flex-start;gap:14px}}
+.gr-card:hover{{border-color:#3a4060}}
+.gr-icon{{font-size:26px;flex-shrink:0}}
+.gr-info{{flex:1;min-width:0}}
+.gr-name{{font-size:14px;font-weight:700;color:#d4d8e8;margin-bottom:4px}}
+.gr-desc{{font-size:12px;color:#8892b0;line-height:1.6}}
+.gr-toggle{{position:relative;width:50px;height:26px;flex-shrink:0;margin-top:4px}}
+.gr-toggle input{{opacity:0;width:0;height:0;position:absolute}}
+.gr-slider{{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#252836;border-radius:26px;transition:.3s}}
+.gr-slider:before{{position:absolute;content:'';height:20px;width:20px;left:3px;bottom:3px;background:#8892b0;border-radius:50%;transition:.3s}}
+.gr-toggle input:checked+.gr-slider{{background:#1c4030}}
+.gr-toggle input:checked+.gr-slider:before{{transform:translateX(24px);background:#64ffda}}
+.on-badge{{font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;background:#1c4030;color:#64ffda;border:1px solid #1a6040}}
+.off-badge{{font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;background:#2a1e1e;color:#ff5555;border:1px solid #4a1e1e}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">🛡 Guardrails</div><div class="page-subtitle">Control safety filters and agent behaviour policies</div></div>
+    <button class="btn btn-primary" onclick="loadGuardrails()">↻ Refresh</button>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="gr-on">—</div><div class="stat-lbl">Enabled</div></div>
+    <div class="stat-card"><div class="stat-num" id="gr-off" style="color:#ff5555">—</div><div class="stat-lbl">Disabled</div></div>
+  </div>
+  <div id="guardrails-list"><div style="text-align:center;padding:40px;color:#8892b0">Loading…</div></div>
+</div>
+<script>
+const GR_META={{
+  pii_filter:{{icon:'🔒',desc:'Strips emails, phone numbers and personal identifiers from agent output before displaying it to you.'}},
+  injection_guard:{{icon:'💉',desc:'Detects and blocks prompt injection attacks — attempts by malicious content to hijack the agent.'}},
+  rate_limit:{{icon:'🚦',desc:'Caps the number of tool calls per agent turn to prevent runaway loops or excessive API usage.'}},
+  write_confirm:{{icon:'✏️',desc:'Requires your confirmation before the agent performs any write operations (send email, create issue, etc.).'}}
+}};
+async function loadGuardrails(){{
+  try{{
+    const r=await fetch('/guardrails'); const d=await r.json();
+    const items=d.guardrails||d||[];
+    const on=items.filter(g=>g.enabled).length;
+    document.getElementById('gr-on').textContent=on;
+    document.getElementById('gr-off').textContent=items.length-on;
+    document.getElementById('guardrails-list').innerHTML=items.map(g=>{{
+      const meta=GR_META[g.name]||{{icon:'🛡',desc:g.description||''}};
+      return `<div class="gr-card">
+        <div class="gr-icon">${{meta.icon}}</div>
+        <div class="gr-info">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <div class="gr-name">${{escH(g.name.replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase()))}}</div>
+            <span class="${{g.enabled?'on-badge':'off-badge'}}" id="badge-${{g.name}}">${{g.enabled?'ON':'OFF'}}</span>
+          </div>
+          <div class="gr-desc">${{meta.desc||escH(g.description||'')}}</div>
+        </div>
+        <label class="gr-toggle" title="Toggle ${{g.name}}">
+          <input type="checkbox" ${{g.enabled?'checked':''}} onchange="toggleGR('${{g.name}}',this)">
+          <span class="gr-slider"></span>
+        </label>
+      </div>`;
+    }}).join('');
+  }}catch(e){{document.getElementById('guardrails-list').innerHTML=`<div style="text-align:center;padding:40px;color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+async function toggleGR(name, checkbox){{
+  try{{
+    const r=await fetch('/guardrails/'+name,{{method:'POST'}});
+    const d=await r.json();
+    const badge=document.getElementById('badge-'+name);
+    if(badge){{badge.textContent=d.enabled?'ON':'OFF';badge.className=d.enabled?'on-badge':'off-badge';}}
+    const on=document.querySelectorAll('.gr-card input:checked').length;
+    document.getElementById('gr-on').textContent=on;
+    document.getElementById('gr-off').textContent=document.querySelectorAll('.gr-card input').length-on;
+  }}catch(e){{alert('Error: '+e.message);checkbox.checked=!checkbox.checked;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadGuardrails();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WEBHOOKS EVENT LOG — API + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/webhooks/events")
+def api_webhook_events():
+    source = request.args.get("source")
+    try:
+        from tools.webhook_server import get_recent_events
+        return jsonify({"events": get_recent_events(source=source or None, limit=50)})
+    except Exception as e:
+        return jsonify({"events": [], "error": str(e)})
+
+@app.route("/webhooks-page")
+def webhooks_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Webhooks — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.whtab-bar{{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}}
+.whtab{{padding:7px 16px;border-radius:20px;border:1px solid #252836;background:#1a1c24;color:#8892b0;font-size:12px;cursor:pointer;transition:all .2s}}
+.whtab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.ev-row{{background:#1a1c24;border:1px solid #252836;border-radius:8px;padding:12px 14px;margin-bottom:7px;display:flex;gap:10px;align-items:flex-start}}
+.ev-row:hover{{border-color:#3a4060}}
+.ev-badge{{padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;flex-shrink:0}}
+.ev-gh{{background:#1c2c1c;color:#50fa7b;border:1px solid #1a4a1a}}
+.ev-jira{{background:#1c2040;color:#64ffda;border:1px solid #1a3060}}
+.ev-body{{flex:1;min-width:0}}
+.ev-type{{font-size:13px;font-weight:600;color:#d4d8e8;margin-bottom:3px}}
+.ev-meta{{font-size:11px;color:#8892b0;display:flex;gap:8px;flex-wrap:wrap}}
+.ev-payload{{font-size:11px;color:#8892b0;font-family:monospace;margin-top:6px;background:#12131a;border-radius:4px;padding:6px 8px;max-height:80px;overflow:auto}}
+.setup-box{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:20px}}
+.setup-box h3{{color:#d4d8e8;font-size:14px;margin:0 0 10px}}
+.url-copy{{display:flex;gap:8px;align-items:center;margin-bottom:10px}}
+.url-copy input{{flex:1;background:#12131a;border:1px solid #252836;border-radius:6px;padding:7px 10px;color:#64ffda;font-size:12px;font-family:monospace}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">🪝 Webhooks</div><div class="page-subtitle">Incoming GitHub and Jira real-time events</div></div>
+    <button class="btn btn-primary" onclick="loadEvents('all',document.querySelector('.whtab.active'))">↻ Refresh</button>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-num" id="wh-total">—</div><div class="stat-lbl">Total Events</div></div>
+    <div class="stat-card"><div class="stat-num" id="wh-gh" style="color:#50fa7b">—</div><div class="stat-lbl">GitHub</div></div>
+    <div class="stat-card"><div class="stat-num" id="wh-jira" style="color:#64ffda">—</div><div class="stat-lbl">Jira</div></div>
+  </div>
+  <div class="whtab-bar">
+    <button class="whtab active" onclick="loadEvents('all',this)">All Events</button>
+    <button class="whtab" onclick="loadEvents('github',this)">🐙 GitHub</button>
+    <button class="whtab" onclick="loadEvents('jira',this)">📋 Jira</button>
+    <button class="whtab" onclick="showSetup(this)">⚙️ Setup</button>
+  </div>
+  <div id="wh-events"></div>
+  <div id="wh-setup" style="display:none">
+    <div class="setup-box">
+      <h3>Configure Webhook URLs</h3>
+      <p style="font-size:12px;color:#8892b0;margin:0 0 14px">Add these URLs to your GitHub repo or Jira project to receive real-time events.</p>
+      <div class="url-copy">
+        <input id="gh-url" readonly>
+        <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836;font-size:11px" onclick="copyUrl('gh-url')">Copy</button>
+      </div>
+      <p style="font-size:11px;color:#8892b0;margin:0 0 12px">GitHub → Settings → Webhooks → Add webhook → Content type: application/json</p>
+      <div class="url-copy">
+        <input id="jira-url" readonly>
+        <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836;font-size:11px" onclick="copyUrl('jira-url')">Copy</button>
+      </div>
+      <p style="font-size:11px;color:#8892b0;margin:0">Jira → Project Settings → Automation → Webhook</p>
+    </div>
+  </div>
+</div>
+<script>
+let _allEvents=[];
+function showSetup(el){{
+  document.querySelectorAll('.whtab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('wh-events').style.display='none';
+  document.getElementById('wh-setup').style.display='';
+  const base=window.location.origin;
+  document.getElementById('gh-url').value=base+'/webhooks/github';
+  document.getElementById('jira-url').value=base+'/webhooks/jira';
+}}
+function copyUrl(id){{navigator.clipboard.writeText(document.getElementById(id).value).then(()=>alert('Copied!'));}}
+async function loadEvents(source,el){{
+  document.querySelectorAll('.whtab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('wh-setup').style.display='none';
+  document.getElementById('wh-events').style.display='';
+  document.getElementById('wh-events').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const url='/webhooks/events'+(source&&source!=='all'?'?source='+source:'');
+    const r=await fetch(url); const d=await r.json();
+    const events=d.events||[];
+    if(source==='all'){{
+      _allEvents=events;
+      document.getElementById('wh-total').textContent=events.length;
+      document.getElementById('wh-gh').textContent=events.filter(e=>e.source==='github').length;
+      document.getElementById('wh-jira').textContent=events.filter(e=>e.source==='jira').length;
+    }}
+    document.getElementById('wh-events').innerHTML=events.length?events.map(ev=>{{
+      const badge=ev.source==='github'?'ev-gh':'ev-jira';
+      const payload=ev.payload?JSON.stringify(ev.payload).slice(0,200)+'…':'';
+      return `<div class="ev-row">
+        <span class="ev-badge ${{badge}}">${{escH(ev.source||'')}}</span>
+        <div class="ev-body">
+          <div class="ev-type">${{escH(ev.event_type||ev.type||'event')}}</div>
+          <div class="ev-meta">
+            ${{ev.repo?`<span>📁 ${{escH(ev.repo)}}</span>`:''}}
+            ${{ev.received_at?`<span>🕐 ${{escH(ev.received_at.slice(0,16))}}</span>`:''}}
+          </div>
+          ${{payload?`<div class="ev-payload">${{escH(payload)}}</div>`:''}}
+        </div>
+      </div>`;
+    }}).join(''):'<div class="empty-msg">No events received yet. Configure the webhook URLs in the Setup tab.</div>';
+  }}catch(e){{document.getElementById('wh-events').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div>`;}}
+}}
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+loadEvents('all',document.querySelector('.whtab'));
+</script></body></html>"""
+    return html
 
 
 # ══════════════════════════════════════════════════════════════════════════════
