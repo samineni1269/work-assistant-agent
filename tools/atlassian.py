@@ -222,6 +222,20 @@ def create_jira_issue(
     Returns:
         {"status": "created", "key": "PROJ-123", "url": "..."}
     """
+    # Validate project key exists before attempting creation
+    try:
+        valid_projects = _jira("GET", "/project?maxResults=50")
+        valid_keys = [p["key"] for p in valid_projects]
+        if project_key not in valid_keys:
+            hint = f"Available projects: {', '.join(valid_keys)}" if valid_keys else "No projects found."
+            raise ValueError(
+                f"Project '{project_key}' does not exist or you don't have access. {hint}"
+            )
+    except ValueError:
+        raise
+    except Exception:
+        pass  # If validation call fails, attempt creation anyway
+
     payload = {
         "fields": {
             "project": {"key": project_key},
