@@ -143,6 +143,80 @@ def get_memory_context() -> str:
     return header + "\n\n" + "\n\n".join(sections)
 
 
+def get_relevant_memory_context(user_message: str, max_facts: int = 15) -> str:
+    """
+    Returns memory context filtered by relevance to the current user message.
+    Scores each stored fact by keyword overlap with the message so the system
+    prompt stays lean as memory grows — instead of dumping everything every turn.
+
+    Falls back to get_memory_context() if no facts score above zero (e.g. on
+    the first turn or when memory is empty).
+    """
+    mem = load_memory()
+
+    # Stopwords: common words that add no signal
+    _STOPWORDS = {
+        "the", "a", "an", "is", "are", "was", "were", "what", "how", "my",
+        "me", "i", "it", "in", "on", "to", "for", "and", "or", "can",
+        "please", "show", "get", "list", "give", "tell", "do", "be", "have",
+        "has", "will", "would", "could", "should", "does", "did", "with",
+    }
+
+    msg_words = set(user_message.lower().split()) - _STOPWORDS
+
+    scored: list[tuple[int, str, str, object]] = []
+    for category, items in mem.items():
+        if category == "updated_at" or not isinstance(items, dict):
+            continue
+        for key, value in items.items():
+            val_str   = str(value).lower() if not isinstance(value, dict) else \
+                        " ".join(str(v) for v in value.values()).lower()
+            fact_words = set(f"{key} {val_str}".lower().split()) - _STOPWORDS
+            score      = len(msg_words & fact_words)
+            # Preferences and context are almost always relevant — give minimum score 1
+            if category in ("preferences", "context"):
+                score = max(score, 1)
+            if score > 0:
+                scored.append((score, category, key, value))
+
+    if not scored:
+        # Nothing scored — return full memory (ensures first-turn context is always present)
+        return get_memory_context()
+
+    scored.sort(key=lambda x: -x[0])
+    top = scored[:max_facts]
+
+    # Group by category for readable output
+    sections_by_cat: dict[str, list[tuple[str, object]]] = {}
+    for _, cat, key, val in top:
+        sections_by_cat.setdefault(cat, []).append((key, val))
+
+    _CAT_LABELS = {
+        "preferences": "Your preferences",
+        "people":      "People you work with",
+        "context":     "Your work context",
+        "patterns":    "Your work patterns",
+        "facts":       "Other facts about you",
+    }
+
+    lines = ["## What I Know About You (relevant to this query):"]
+    for cat, label in _CAT_LABELS.items():
+        if cat not in sections_by_cat:
+            continue
+        lines.append(f"\n**{label}:**")
+        for key, val in sections_by_cat[cat]:
+            if isinstance(val, dict):
+                parts = [key]
+                if val.get("role"):  parts.append(f"({val['role']})")
+                if val.get("email"): parts.append(f"<{val['email']}>")
+                if val.get("notes"): parts.append(f"— {val['notes']}")
+                lines.append("  - " + " ".join(parts))
+            else:
+                lines.append(f"  - {key}: {val}")
+
+    return "\n".join(lines)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # AUTO-EXTRACTION — learn from each conversation turn
 # ══════════════════════════════════════════════════════════════════════════════

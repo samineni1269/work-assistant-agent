@@ -238,3 +238,122 @@ class TurnTimer:
     @elapsed_ms.setter
     def elapsed_ms(self, v):
         self._elapsed_ms = v
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COST TRACKING — per-LLM-call cost logging
+# ══════════════════════════════════════════════════════════════════════════════
+
+COSTS_FILE = _BASE / "costs.jsonl"
+
+# Cost per 1M tokens (USD) — current as of 2025
+COST_PER_1M_TOKENS = {
+    # Gemini
+    "gemini-2.5-flash":            {"input": 0.15,  "output": 0.60},
+    "gemini-2.0-flash":            {"input": 0.10,  "output": 0.40},
+    "gemini-2.0-flash-lite":       {"input": 0.075, "output": 0.30},
+    "gemini-1.5-flash":            {"input": 0.075, "output": 0.30},
+    "gemini-2.0-flash-thinking-exp-01-21": {"input": 0.0, "output": 0.0},
+    # Claude
+    "claude-opus-4-6":             {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4-6":           {"input": 3.00,  "output": 15.00},
+    "claude-haiku-4-5-20251001":   {"input": 0.80,  "output": 4.00},
+    "claude-sonnet-3-5":           {"input": 3.00,  "output": 15.00},
+    "claude-haiku-3":              {"input": 0.25,  "output": 1.25},
+    # OpenAI
+    "gpt-4o":                      {"input": 2.50,  "output": 10.00},
+    "gpt-4o-mini":                 {"input": 0.15,  "output": 0.60},
+    "gpt-4-turbo":                 {"input": 10.00, "output": 30.00},
+    # MiniMax
+    "MiniMax-M2.7":                {"input": 0.80,  "output": 2.40},
+    "MiniMax-M2.5":                {"input": 0.40,  "output": 1.20},
+    # OpenRouter (popular routes)
+    "anthropic/claude-sonnet-4-5": {"input": 3.00,  "output": 15.00},
+    "openai/gpt-4o-mini":          {"input": 0.15,  "output": 0.60},
+}
+
+_FALLBACK_COST = {"input": 1.00, "output": 3.00}  # conservative unknown-model fallback
+
+
+def log_cost(model: str, provider: str, input_tokens: int, output_tokens: int) -> None:
+    """
+    Record one LLM API call cost to costs.jsonl.
+    Called automatically from each provider's run_turn() after every API call.
+    Silent on failure so it never interrupts the agent.
+    """
+    rates = COST_PER_1M_TOKENS.get(model, _FALLBACK_COST)
+    cost_usd = (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
+    entry = {
+        "ts":            datetime.datetime.now().isoformat(),
+        "provider":      provider,
+        "model":         model,
+        "input_tokens":  input_tokens,
+        "output_tokens": output_tokens,
+        "cost_usd":      round(cost_usd, 8),
+    }
+    try:
+        with open(COSTS_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
+def get_cost_summary(days_back: int = 7) -> dict:
+    """
+    Return a cost breakdown for the last N days.
+    Agent-callable: shows how much each model costs per day.
+    """
+    if not COSTS_FILE.exists():
+        return {
+            "message":   "No cost data recorded yet. Costs are tracked from the next agent turn.",
+            "total_usd": 0.0,
+        }
+
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=days_back)
+    records = []
+    try:
+        with open(COSTS_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                    ts = datetime.datetime.fromisoformat(r["ts"])
+                    if ts >= cutoff:
+                        records.append(r)
+                except Exception:
+                    pass
+    except Exception:
+        return {"message": "Error reading cost data.", "total_usd": 0.0}
+
+    if not records:
+        return {
+            "message":   f"No cost data for the last {days_back} days.",
+            "total_usd": 0.0,
+        }
+
+    total_usd    = sum(r.get("cost_usd", 0) for r in records)
+    total_calls  = len(records)
+    total_input  = sum(r.get("input_tokens", 0) for r in records)
+    total_output = sum(r.get("output_tokens", 0) for r in records)
+
+    by_model = defaultdict(lambda: {"calls": 0, "cost_usd": 0.0, "tokens": 0})
+    for r in records:
+        m = r.get("model", "unknown")
+        by_model[m]["calls"]    += 1
+        by_model[m]["cost_usd"] += r.get("cost_usd", 0)
+        by_model[m]["tokens"]   += r.get("input_tokens", 0) + r.get("output_tokens", 0)
+
+    top_models = sorted(by_model.items(), key=lambda x: -x[1]["cost_usd"])[:8]
+
+    return {
+        "days_back":           days_back,
+        "total_usd":           round(total_usd, 4),
+        "total_calls":         total_calls,
+        "total_input_tokens":  total_input,
+        "total_output_tokens": total_output,
+        "avg_cost_per_call":   round(total_usd / total_calls, 6) if total_calls else 0,
+        "by_model":            [{"model": m, **stats} for m, stats in top_models],
+        "generated_at":        datetime.datetime.now().isoformat(),
+    }

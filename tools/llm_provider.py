@@ -680,6 +680,16 @@ TOOLS = [
          "days_back": {"type": "integer", "description": "How many days to analyse (default 7)"},
      }}},
 
+    {"name": "get_cost_summary",
+     "description": (
+         "Show LLM API cost breakdown — total spend, cost per model, tokens used. "
+         "Use when the user asks 'how much is this costing?', 'what's my API spend?', "
+         "'which model costs the most?', or 'show me cost data'."
+     ),
+     "parameters": {"type": "object", "properties": {
+         "days_back": {"type": "integer", "description": "How many days to include (default 7)"},
+     }}},
+
     # ── SLACK ────────────────────────────────────────────────────────────────
     {"name": "list_slack_channels",
      "description": "List public and private Slack channels the bot has access to.",
@@ -1221,6 +1231,15 @@ class GeminiProvider(BaseProvider):
             )
         except Exception as exc:
             raise RuntimeError(_friendly_api_error(exc, "Gemini", self.model)) from exc
+        # Log cost (silent on failure)
+        try:
+            from tools.analytics import log_cost
+            usage = response.usage_metadata
+            log_cost(self.model, "gemini",
+                     getattr(usage, "prompt_token_count", 0),
+                     getattr(usage, "candidates_token_count", 0))
+        except Exception:
+            pass
         parts = response.candidates[0].content.parts
         calls = [p.function_call for p in parts if p.function_call]
         if calls:
@@ -1248,6 +1267,14 @@ class ClaudeProvider(BaseProvider):
             )
         except Exception as exc:
             raise RuntimeError(_friendly_api_error(exc, "Claude", self.model)) from exc
+        # Log cost (silent on failure)
+        try:
+            from tools.analytics import log_cost
+            log_cost(self.model, "claude",
+                     response.usage.input_tokens,
+                     response.usage.output_tokens)
+        except Exception:
+            pass
         tool_blocks = [b for b in response.content if b.type == "tool_use"]
         if tool_blocks:
             return [(b.name, b.input, b.id) for b in tool_blocks], None
@@ -1282,6 +1309,16 @@ class OpenAIProvider(BaseProvider):
             print(f"\n[MiniMax ERROR] {type(exc).__name__}: {exc}")
             traceback.print_exc()
             raise RuntimeError(_friendly_api_error(exc, self.name.capitalize(), self.model)) from exc
+        # Log cost (silent on failure)
+        try:
+            from tools.analytics import log_cost
+            usage = response.usage
+            if usage:
+                log_cost(self.model, self.name,
+                         usage.prompt_tokens,
+                         usage.completion_tokens)
+        except Exception:
+            pass
         msg = response.choices[0].message
         if msg.tool_calls:
             calls = [

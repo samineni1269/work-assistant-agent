@@ -45,5 +45,8 @@ apscheduler>=3.10.0              # Daily briefing scheduler (tools/briefing.py)
 # ── Webhook listener ──────────────────────────────────────────────────────────
 # Uses Flask (already above) — no extra dep needed for GitHub/Jira webhooks
 
+# ── MCP Server (Claude Desktop integration) ──────────────────────────────────
+fastmcp>=0.4.0                   # MCP server framework (pip install fastmcp)
+
 # ── Testing ────────────────────────────────────────────────────────────────────
 pytest>=8.0.0                    # Test runner (run: pytest tests/ -v)

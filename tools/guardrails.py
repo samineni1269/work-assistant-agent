@@ -46,9 +46,20 @@ GUARDRAIL_META = {
         "icon":        "🚧",
         "description": "Blocks runaway tool loops and operations on unsafe numbers of items in a single turn.",
     },
+    "pii_redaction": {
+        "label":       "PII Redaction",
+        "icon":        "🔒",
+        "description": "Redacts personal identifiable information (phone numbers, SSNs, NIDs, credit card numbers) from external content before it reaches the LLM.",
+    },
+    "topic_scope": {
+        "label":       "Work Topic Scope",
+        "icon":        "🎯",
+        "description": "Limits the agent to work-related requests only (email, calendar, Jira, GitHub, etc.). Off by default — opt-in.",
+    },
 }
 
 _DEFAULTS = {name: True for name in GUARDRAIL_META}
+_DEFAULTS["topic_scope"] = False  # opt-in only — disabled by default
 
 # Maximum tool calls in one agent turn before bulk_protection kicks in
 MAX_TOOL_CALLS_PER_TURN = 12
@@ -131,7 +142,7 @@ _INJECTION_PATTERNS = [
     r"from now on you (will|must|should)",
     r"your new (role|job|task|purpose) is",
     r"jailbreak",
-    r"DAN mode",
+    r"dan mode",
     r"developer mode enabled",
     r"do anything now",
     r"\[system\]",
@@ -189,6 +200,60 @@ def scrub_secrets(text: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# PII REDACTION PATTERNS
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PII_PATTERNS = [
+    # UK mobile (07xxx xxxxxx or +447xxx xxxxxx or +44 7xxx xxxxxx)
+    (r'(?<!\d)(?:\+44|0044|0)[\s\-]?7\d{3}[\s\-]?\d{6}(?!\d)',     "[PHONE_REDACTED]"),
+    # US phone (e.g. 555-867-5309 or (555) 867-5309)
+    (r'\b(?:\+1[\s\-]?)?\(?\d{3}\)?[\s\-]\d{3}[\s\-]\d{4}\b',      "[PHONE_REDACTED]"),
+    # US Social Security Number (XXX-XX-XXXX)
+    (r'\b\d{3}-\d{2}-\d{4}\b',                                       "[SSN_REDACTED]"),
+    # UK National Insurance Number (e.g. AB123456C)
+    (r'\b[A-Z]{2}\d{6}[A-Z]\b',                                      "[NIN_REDACTED]"),
+    # Credit/debit card (Visa 4xxx, Mastercard 5xxx/2xxx, Amex 3xxx, 13-16 digits)
+    (r'\b(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2})[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{3,4}\b',
+                                                                      "[CARD_REDACTED]"),
+]
+
+# Off-topic phrases that trigger topic scope guardrail (when enabled)
+_OFF_TOPIC_PHRASES = [
+    "write me a poem", "tell me a joke", "play a game",
+    "write a story", "write a song", "roleplay",
+    "pretend you are", "imagine you are",
+    "do my homework", "write my essay",
+    "write a novel", "write fiction",
+]
+
+
+def redact_pii(text: str) -> str:
+    """
+    Remove PII from text — phone numbers, SSNs, NIDs, credit card numbers.
+    Works as a utility (like scrub_secrets); caller checks setting before calling.
+    """
+    for pattern, replacement in _PII_PATTERNS:
+        text = re.sub(pattern, replacement, text)
+    return text
+
+
+def _check_topic_scope(text: str) -> tuple[bool, str]:
+    """
+    Returns (in_scope, reason).  Only called when topic_scope guardrail is enabled.
+    Blocks clearly off-topic requests; errs toward allowing ambiguous work queries.
+    """
+    tl = text.lower()
+    for phrase in _OFF_TOPIC_PHRASES:
+        if phrase in tl:
+            return False, (
+                "I'm a work assistant focused on email, calendar, Jira, GitHub, "
+                "Teams, SharePoint, and document tools. "
+                "I'm not set up to help with that kind of request."
+            )
+    return True, ""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # WRITE TOOLS  (for audit log)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -229,6 +294,11 @@ def check_input(text: str) -> tuple[bool, str]:
             "🛡 Guardrail blocked: your message matches a known prompt-injection pattern. "
             "If this is a legitimate request, please rephrase it."
         )
+
+    if settings.get("topic_scope"):
+        in_scope, scope_reason = _check_topic_scope(text)
+        if not in_scope:
+            return False, scope_reason
 
     return True, ""
 
@@ -274,6 +344,10 @@ def process_tool_result(tool_name: str, result: str) -> tuple[str, str | None]:
 
     if settings.get("secret_scrubbing"):
         result = scrub_secrets(result)
+
+    # Redact PII from content fetched from external sources (emails, tickets, etc.)
+    if settings.get("pii_redaction", True) and tool_name in _CONTENT_TOOLS:
+        result = redact_pii(result)
 
     if settings.get("prompt_injection") and tool_name in _CONTENT_TOOLS:
         if _has_injection(result):

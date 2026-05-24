@@ -123,7 +123,7 @@ READ_TOOLS = {
     "list_google_calendar_events",
     # Super-agent reads
     "search_knowledge_base", "browse_url", "search_web",
-    "get_memory_summary", "get_analytics_summary",
+    "get_memory_summary", "get_analytics_summary", "get_cost_summary",
     # Slack reads
     "list_slack_channels", "get_slack_messages", "get_slack_thread",
     "list_slack_dms", "get_slack_dm_history", "search_slack", "get_slack_user_info",
@@ -361,8 +361,9 @@ def dispatch_tool(name: str, args: dict) -> str:
         # Memory
         "update_memory_entry":   lambda: _mem().update_memory_entry(**args),
         "get_memory_summary":    lambda: _mem().get_memory_summary(),
-        # Analytics
+        # Analytics & Cost
         "get_analytics_summary": lambda: _analytics().get_analytics_summary(**args),
+        "get_cost_summary":      lambda: _analytics().get_cost_summary(**args),
         # Meeting prep
         "get_meeting_brief":   lambda: __import__("tools.meeting_prep", fromlist=["get_next_meeting_brief"]).get_next_meeting_brief(),
         # Self-learning state
@@ -594,12 +595,12 @@ def _indent(text: str, spaces: int) -> str:
 # SYSTEM PROMPT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _build_system_prompt() -> str:
-    """Build the system prompt, injecting memory and tone guide dynamically."""
-    from tools.memory import get_memory_context
+def _build_system_prompt(user_message: str = "") -> str:
+    """Build the system prompt, injecting relevant memory and tone guide dynamically."""
+    from tools.memory import get_relevant_memory_context
     from tools.tone_learner import get_tone_instructions
 
-    memory_ctx = get_memory_context()
+    memory_ctx = get_relevant_memory_context(user_message)
     tone_guide = get_tone_instructions()
     today = datetime.datetime.now().strftime("%A, %d %B %Y — %H:%M")
 
@@ -842,13 +843,76 @@ def _build_plan(user_message: str, provider) -> str:
     )
     try:
         _, plan_text = provider.run_turn(
-            system_prompt=_build_system_prompt(),
+            system_prompt=_build_system_prompt(user_message),
             history=[{"role": "user", "content": plan_prompt}],
             tools=[],
         )
         return plan_text.strip()
     except Exception:
         return ""
+
+
+def _parse_plan_steps(plan_text: str) -> list[str]:
+    """
+    Extract individual steps from a plan string.
+    Handles: numbered lists (1. / 1) / Step 1:), bullet lists (- / • / *).
+    Returns empty list if no steps can be parsed.
+    """
+    import re
+    # Match: leading number/bullet followed by text
+    steps = re.findall(
+        r'^\s*(?:\d+[\.\)]\s+|(?:Step\s+\d+\s*[:—]\s*)|[-•*]\s+)(.+)$',
+        plan_text,
+        re.MULTILINE | re.IGNORECASE,
+    )
+    return [s.strip() for s in steps if s.strip()]
+
+
+def _maybe_reflect(user_message: str, draft: str, provider) -> str:
+    """
+    Optional self-critique pass for long-form write/draft/create outputs.
+    Only runs when REFLECTION_ENABLED=true|1|yes in .env.
+    Returns the improved response if the model suggests revisions, otherwise the original.
+
+    The reflection adds one extra LLM call but catches obvious omissions and
+    structural issues before the response reaches the user.
+    """
+    _WRITE_KEYWORDS = {
+        "write", "draft", "create", "generate", "summarise", "summarize",
+        "report", "document", "compose", "prepare", "plan", "analyse", "analyze",
+    }
+    msg_lower   = user_message.lower()
+    is_write    = any(kw in msg_lower for kw in _WRITE_KEYWORDS)
+    is_long     = len(draft.split()) > 150
+
+    if not (is_write and is_long):
+        return draft  # not worth a reflection pass
+
+    critique_history = [
+        {"role": "user",      "content": user_message},
+        {"role": "assistant", "content": draft},
+        {"role": "user",      "content": (
+            "Review your response above. "
+            "Does it fully and accurately address the request? "
+            "Is it clear, well-structured, and professional? "
+            "If it is already excellent, reply with exactly: APPROVED\n"
+            "If improvements are needed, reply with: REVISED:\n"
+            "then the complete improved version (not just the changes)."
+        )},
+    ]
+    try:
+        _, critique = provider.run_turn(
+            "You are a self-reviewing assistant. Be honest and concise.",
+            critique_history,
+            [],
+        )
+        if critique and critique.strip().startswith("REVISED:"):
+            improved = critique[len("REVISED:"):].strip()
+            if improved and len(improved.split()) > 50:
+                return improved
+    except Exception:
+        pass  # on any failure, return original draft unchanged
+    return draft
 
 
 def run_agent_turn(conversation_history: list, user_message: str,
@@ -926,14 +990,16 @@ def run_agent_turn(conversation_history: list, user_message: str,
     tool_call_count = 0   # tracked for bulk_protection
     iteration_count = 0   # cap runaway loops
 
-    system_prompt = _build_system_prompt()
+    system_prompt = _build_system_prompt(user_message)
 
     # ── Planner mode: generate plan first for complex multi-step requests ─────
     plan_prefix = ""
+    _plan_steps: list[str] = []
     if _is_complex_request(user_message):
         try:
             plan_text = _build_plan(user_message, provider)
             if plan_text:
+                _plan_steps = _parse_plan_steps(plan_text)
                 plan_prefix = f"**📋 My plan:**\n{plan_text}\n\n---\n\n"
         except Exception:
             pass  # silent fallback — run without plan header
@@ -960,6 +1026,14 @@ def run_agent_turn(conversation_history: list, user_message: str,
             # ── Guardrail 2: scrub secrets from final response ────────────────
             text = plan_prefix + scrub_output(text)
             plan_prefix = ""   # only prepend once; clear after first use
+
+            # ── Optional reflection pass for long-form write/draft tasks ──────
+            if os.getenv("REFLECTION_ENABLED", "").lower() in ("1", "true", "yes"):
+                try:
+                    text = _maybe_reflect(user_message, text, provider)
+                except Exception:
+                    pass  # never let reflection crash the agent
+
             final_turn = {"role": "assistant", "content": text}
             conversation_history.append(final_turn)
             working_history.append(final_turn)
