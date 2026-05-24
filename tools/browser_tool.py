@@ -117,6 +117,55 @@ def _score_credibility(url: str) -> dict:
             "reason": "Domain not in trust list — treat with caution"}
 
 
+# ── PARALLEL FETCH ────────────────────────────────────────────────────────
+
+def _parallel_browse(
+    urls: list[str],
+    extract: str = "text",
+    wait_seconds: int = 2,
+    max_chars: int = 6000,
+    max_workers: int = 4,
+) -> list[dict]:
+    """
+    Fetch multiple URLs in parallel using a thread pool.
+
+    Each URL gets its own Playwright browser instance running in a separate
+    thread. Results are returned in the same order as the input urls list.
+
+    Args:
+        urls:        List of URLs to fetch
+        extract:     "text" | "links" | "both" (passed to browse_url)
+        wait_seconds: JS render wait per page (lower than single browse to save time)
+        max_chars:   Max chars per page
+        max_workers: Thread pool size (default 4 — avoids overwhelming CPU)
+
+    Returns:
+        List of dicts (same structure as browse_url). On per-URL error,
+        the dict contains {"url": ..., "error": "..."}  instead of content.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch_one(url: str) -> dict:
+        try:
+            return browse_url(url, extract=extract,
+                              wait_seconds=wait_seconds, max_chars=max_chars)
+        except Exception as exc:
+            return {"url": url, "error": str(exc), "text": "", "title": ""}
+
+    # Preserve input order
+    results_map: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(urls))) as pool:
+        future_to_url = {pool.submit(_fetch_one, url): url for url in urls}
+        for future in as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                results_map[url] = future.result()
+            except Exception as exc:
+                results_map[url] = {"url": url, "error": str(exc), "text": "", "title": ""}
+
+    return [results_map[url] for url in urls]
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PLAYWRIGHT WRAPPER
 # ══════════════════════════════════════════════════════════════════════════════

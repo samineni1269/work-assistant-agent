@@ -50,3 +50,32 @@ def test_score_credibility_unknown_domain():
     result = _score_credibility("https://somerandomblog123.com/post")
     assert result["tier"] == "UNKNOWN"
     assert "score" in result
+
+
+# ── Task 3: parallel browsing ──────────────────────────────────────────────
+
+def test_parallel_browse_returns_list():
+    from tools.browser_tool import _parallel_browse
+    from unittest.mock import patch
+    with patch("tools.browser_tool.browse_url") as mock_browse:
+        mock_browse.side_effect = lambda url, **kw: {"url": url, "text": f"content of {url}", "title": "Test"}
+        results = _parallel_browse(["https://example.com", "https://example.org"], max_workers=2)
+    assert len(results) == 2
+    assert all("text" in r for r in results)
+
+
+def test_parallel_browse_handles_errors_gracefully():
+    from tools.browser_tool import _parallel_browse
+    from unittest.mock import patch
+    with patch("tools.browser_tool.browse_url") as mock_browse:
+        def side_effect(url, **kw):
+            if "bad" in url:
+                raise RuntimeError("Network error")
+            return {"url": url, "text": "ok", "title": "Test"}
+        mock_browse.side_effect = side_effect
+        results = _parallel_browse(["https://good.com", "https://bad.com"])
+    assert len(results) == 2
+    good = next(r for r in results if "good" in r["url"])
+    bad  = next(r for r in results if "bad" in r["url"])
+    assert good["text"] == "ok"
+    assert "error" in bad
