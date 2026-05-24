@@ -39,6 +39,84 @@ def _extract_with_trafilatura(html: str) -> str | None:
         return None
 
 
+# ── CREDIBILITY SCORING ───────────────────────────────────────────────────
+
+_HIGH_DOMAINS = {
+    # Government / official
+    ".gov", ".gov.uk", ".gov.au", ".eu", ".europa.eu",
+    # Academic
+    ".edu", ".ac.uk", ".ac.au",
+    # Major wire services and encyclopedias
+    "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk",
+    "npr.org", "pbs.org", "wikipedia.org",
+    # Science / research
+    "nature.com", "science.org", "pubmed.ncbi.nlm.nih.gov",
+    "scholar.google.com", "arxiv.org", "ncbi.nlm.nih.gov",
+    # Major tech documentation
+    "docs.python.org", "developer.mozilla.org", "docs.microsoft.com",
+    "learn.microsoft.com",
+}
+
+_MEDIUM_DOMAINS = {
+    # Major newspapers / broadcasters
+    "nytimes.com", "theguardian.com", "washingtonpost.com", "wsj.com",
+    "economist.com", "ft.com", "bloomberg.com", "businessinsider.com",
+    "forbes.com", "techcrunch.com", "wired.com", "arstechnica.com",
+    "theatlantic.com", "time.com", "cnn.com", "nbcnews.com", "abcnews.go.com",
+    # Quality tech sources
+    "stackoverflow.com", "github.com", "medium.com",
+    "towardsdatascience.com", "hackernews.com", "news.ycombinator.com",
+}
+
+_LOW_DOMAINS = {
+    "reddit.com", "twitter.com", "x.com", "facebook.com",
+    "instagram.com", "tiktok.com", "youtube.com",
+    "quora.com", "answers.yahoo.com",
+}
+
+
+def _score_credibility(url: str) -> dict:
+    """
+    Score a URL's source credibility based on its domain.
+
+    Returns:
+        {
+            "url":    str,
+            "domain": str,
+            "tier":   "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN",
+            "score":  float,   # 0.0 – 1.0
+            "reason": str,
+        }
+    """
+    import urllib.parse
+    try:
+        parsed = urllib.parse.urlparse(url)
+        domain = parsed.netloc.lower().lstrip("www.")
+    except Exception:
+        return {"url": url, "domain": "", "tier": "UNKNOWN", "score": 0.5, "reason": "Could not parse URL"}
+
+    # Check TLD suffixes first (covers all .gov, .edu etc.)
+    for suffix in _HIGH_DOMAINS:
+        if domain == suffix or domain.endswith(suffix):
+            return {"url": url, "domain": domain, "tier": "HIGH", "score": 0.9,
+                    "reason": f"Trusted domain suffix: {suffix}"}
+
+    # Check exact medium domains
+    for d in _MEDIUM_DOMAINS:
+        if domain == d or domain.endswith("." + d):
+            return {"url": url, "domain": domain, "tier": "MEDIUM", "score": 0.65,
+                    "reason": f"Known quality source: {d}"}
+
+    # Check low-trust domains
+    for d in _LOW_DOMAINS:
+        if domain == d or domain.endswith("." + d):
+            return {"url": url, "domain": domain, "tier": "LOW", "score": 0.3,
+                    "reason": f"User-generated / social content: {d}"}
+
+    return {"url": url, "domain": domain, "tier": "UNKNOWN", "score": 0.5,
+            "reason": "Domain not in trust list — treat with caution"}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PLAYWRIGHT WRAPPER
 # ══════════════════════════════════════════════════════════════════════════════
