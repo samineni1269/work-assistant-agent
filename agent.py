@@ -357,6 +357,7 @@ def dispatch_tool(name: str, args: dict) -> str:
         # Browser
         "browse_url":            lambda: _browser().browse_url(**args),
         "search_web":            lambda: _browser().search_web(**args),
+        "deep_research":         lambda: _browser().deep_research(**args),
         # Memory
         "update_memory_entry":   lambda: _mem().update_memory_entry(**args),
         "get_memory_summary":    lambda: _mem().get_memory_summary(),
@@ -761,8 +762,13 @@ def _summarise_history(history: list, provider) -> list:
     if len(history) <= KEEP_RECENT:
         return history
 
-    old_turns = history[:-KEEP_RECENT]
-    recent    = history[-KEEP_RECENT:]
+    # Find a safe split point: never start `recent` on a role:"tool" message
+    # because its paired assistant tool_call would be lost in old_turns.
+    split = len(history) - KEEP_RECENT
+    while split > 0 and history[split].get("role") == "tool":
+        split -= 1
+    old_turns = history[:split]
+    recent    = history[split:]
 
     # Build a plain text transcript of old turns
     transcript_lines = []

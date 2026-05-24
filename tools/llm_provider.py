@@ -635,6 +635,21 @@ TOOLS = [
          "max_results": {"type": "integer", "description": "Number of results (default 5)"},
      }}},
 
+    {"name": "deep_research",
+     "description": (
+         "Autonomously research a topic in depth: searches the web multiple times, "
+         "reads the best pages in parallel, scores sources by credibility, and returns "
+         "a comprehensive research corpus with credibility stats. Use instead of search_web "
+         "when the user asks to 'research', 'investigate', 'find out everything about', "
+         "'give me a detailed report on', or 'deep dive into' a topic."
+     ),
+     "parameters": {"type": "object", "required": ["topic"], "properties": {
+         "topic":      {"type": "string",  "description": "The topic or question to research"},
+         "depth":      {"type": "integer", "description": "Number of search rounds (1=quick, 2=standard, 3=thorough). Default 2."},
+         "use_cache":  {"type": "boolean", "description": "Use cached results if topic was researched recently (default true)"},
+         "cache_hours":{"type": "integer", "description": "Max age of cached research in hours (default 24)"},
+     }}},
+
     # ── MEMORY ───────────────────────────────────────────────────────────────
     {"name": "update_memory_entry",
      "description": (
@@ -1347,7 +1362,7 @@ class MiniMaxProvider(OpenAIProvider):
                      "list_zoom_recordings"},
         "notion":   {"search_notion","get_notion_page","create_notion_page",
                      "list_notion_databases","query_notion_database"},
-        "general":  {"search_knowledge_base","browse_url","search_web","update_memory_entry",
+        "general":  {"search_knowledge_base","browse_url","search_web","deep_research","update_memory_entry",
                      "get_memory_summary","get_analytics_summary","extract_action_items",
                      "get_my_action_items","complete_action_item","score_notifications",
                      "send_morning_briefing","get_webhook_events"},
