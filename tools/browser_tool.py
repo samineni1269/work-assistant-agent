@@ -308,7 +308,7 @@ def scrape_structured(
 def search_web(query: str, max_results: int = 5) -> dict:
     """
     Agent-callable: do a DuckDuckGo search and return top results.
-    Uses no API key — just scrapes DuckDuckGo HTML.
+    Uses no API key — scrapes DuckDuckGo Lite HTML via requests.
 
     Args:
         query:       Search query
@@ -317,38 +317,58 @@ def search_web(query: str, max_results: int = 5) -> dict:
     Returns dict with: query, results [{title, url, snippet}]
     """
     import urllib.parse
+    import urllib.request
+
     encoded = urllib.parse.quote_plus(query)
-    url     = f"https://html.duckduckgo.com/html/?q={encoded}"
+    url = f"https://lite.duckduckgo.com/lite/?q={encoded}"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
 
-    sync_playwright = _get_playwright_page()
+    try:
+        req  = urllib.request.Request(url, headers=headers)
+        resp = urllib.request.urlopen(req, timeout=12)
+        html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return {"query": query, "error": str(e), "results": []}
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        page    = browser.new_context().new_page()
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            time.sleep(1)
+    # ── Parse lite DDG HTML ────────────────────────────────────────────────
+    # Results live in a <table>.  Each result row has:
+    #   <a class="result-link" href="/l/?uddg=<encoded-url>&...">title</a>
+    #   followed by a <td class="result-snippet">snippet text</td>
+    # We extract uddg= URLs + anchor text + snippet with regex (no BeautifulSoup dep).
+    result_re = re.compile(
+        r'<a[^>]+class="result-link"[^>]+href="[^"]*uddg=([^&"]+)[^"]*"[^>]*>'
+        r'(.*?)</a>'
+        r'(?:.*?<td[^>]+class="result-snippet"[^>]*>\s*(.*?)\s*</td>)?',
+        re.DOTALL,
+    )
 
-            results = page.evaluate(f"""(limit) => {{
-                const items = [];
-                document.querySelectorAll('.result__body').forEach((el, i) => {{
-                    if (i >= limit) return;
-                    const titleEl   = el.querySelector('.result__a');
-                    const snippetEl = el.querySelector('.result__snippet');
-                    if (titleEl) items.push({{
-                        title:   titleEl.innerText.trim(),
-                        url:     titleEl.href,
-                        snippet: snippetEl ? snippetEl.innerText.trim() : '',
-                    }});
-                }});
-                return items;
-            }}""", max_results)
+    results = []
+    for m in result_re.finditer(html):
+        if len(results) >= max_results:
+            break
+        raw_url  = urllib.parse.unquote(m.group(1))
+        title    = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+        snippet  = re.sub(r"<[^>]+>", "", m.group(3) or "").strip()
+        if raw_url.startswith("http") and title:
+            results.append({"title": title, "url": raw_url, "snippet": snippet})
 
-            return {"query": query, "results": results}
-        except Exception as e:
-            return {"query": query, "error": str(e), "results": []}
-        finally:
-            browser.close()
+    # ── Fallback: grab uddg= URLs directly if the regex found nothing ─────
+    if not results:
+        urls_found = re.findall(r'uddg=([^&"\'>\s]+)', html)
+        for raw in urls_found:
+            if len(results) >= max_results:
+                break
+            decoded = urllib.parse.unquote(raw)
+            if decoded.startswith("http") and "duckduckgo.com" not in decoded:
+                results.append({"title": decoded, "url": decoded, "snippet": ""})
+
+    return {"query": query, "results": results}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
