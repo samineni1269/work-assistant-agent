@@ -17,6 +17,28 @@ import time
 from typing import Optional
 
 
+def _extract_with_trafilatura(html: str) -> str | None:
+    """
+    Use trafilatura to extract clean article text from raw HTML.
+    Returns None if trafilatura finds nothing useful (e.g. navigation-only pages).
+    Falls back gracefully if trafilatura is not installed.
+    """
+    if not html:
+        return None
+    try:
+        import trafilatura
+        return trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=True,
+            no_fallback=False,
+        )
+    except ImportError:
+        return None
+    except Exception:
+        return None
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PLAYWRIGHT WRAPPER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -73,17 +95,24 @@ def browse_url(
             result["title"] = page.title()
 
             if extract in ("text", "both"):
-                # Remove nav/footer/scripts and get clean body text
-                text = page.evaluate("""() => {
-                    const remove = document.querySelectorAll(
-                        'nav,footer,header,script,style,noscript,.cookie-banner,.ad,.advertisement'
-                    );
-                    remove.forEach(el => el.remove());
-                    return (document.body || document).innerText;
-                }""")
-                # Clean up whitespace
-                text = re.sub(r'\n{3,}', '\n\n', text.strip())
-                text = re.sub(r' {2,}', ' ', text)
+                # Get raw HTML first, try trafilatura for clean extraction
+                raw_html = page.content()
+                clean = _extract_with_trafilatura(raw_html)
+                if clean and len(clean) > 200:
+                    # trafilatura gave us clean article text
+                    text = clean
+                else:
+                    # Fallback: JS-based extraction (removes nav/footer/scripts)
+                    text = page.evaluate("""() => {
+                        const remove = document.querySelectorAll(
+                            'nav,footer,header,script,style,noscript,.cookie-banner,.ad,.advertisement'
+                        );
+                        remove.forEach(el => el.remove());
+                        return (document.body || document).innerText;
+                    }""")
+                    text = re.sub(r'\n{3,}', '\n\n', text.strip())
+                    text = re.sub(r' {2,}', ' ', text)
+
                 result["text"] = text[:max_chars]
                 result["word_count"] = len(text.split())
 
