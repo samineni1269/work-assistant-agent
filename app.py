@@ -1787,6 +1787,39 @@ def connections_page():
   <div class="conn-grid" id="conn-grid">
     <div class="empty-state"><div class="empty-state-icon">⏳</div><div class="empty-state-txt">Loading connections…</div></div>
   </div>
+
+  <!-- ── MCP Server — Claude Desktop Integration ───────────────────────── -->
+  <div style="margin-top:28px;margin-bottom:8px;font-size:11px;font-weight:700;color:#8892b0;letter-spacing:.5px;text-transform:uppercase">🤖 Claude Desktop MCP Integration</div>
+  <div style="background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:20px 22px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:260px">
+        <div style="font-size:14px;font-weight:700;color:#d4d8e8;margin-bottom:6px">Expose tools to Claude Desktop via MCP</div>
+        <div style="font-size:12px;color:#8892b0;line-height:1.7;margin-bottom:12px">
+          The included <code style="background:#12131a;padding:1px 5px;border-radius:4px;color:#64ffda">mcp_server.py</code> lets Claude Desktop call your agent's tools directly — email, calendar, GitHub, Jira, memory, analytics and more — without opening the web UI.<br>
+          <br>
+          <strong style="color:#d4d8e8">Step 1:</strong> Install FastMCP &nbsp;<code style="background:#12131a;padding:1px 6px;border-radius:4px;color:#bd93f9">pip install fastmcp</code><br>
+          <strong style="color:#d4d8e8">Step 2:</strong> Add the config below to <code style="background:#12131a;padding:1px 5px;border-radius:4px;color:#64ffda">~/.claude/claude_desktop_config.json</code><br>
+          <strong style="color:#d4d8e8">Step 3:</strong> Restart Claude Desktop — your tools appear automatically.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="copyMcpConfig()" style="font-size:12px">📋 Copy Config</button>
+          <span style="font-size:11px;color:#8892b0;align-self:center" id="mcp-copy-confirm" style="display:none"></span>
+        </div>
+      </div>
+      <div style="flex:1;min-width:260px">
+        <div style="font-size:11px;color:#8892b0;margin-bottom:6px;font-weight:600">claude_desktop_config.json</div>
+        <pre id="mcp-config-block" style="background:#12131a;border:1px solid #252836;border-radius:6px;padding:12px 14px;font-size:11px;color:#64ffda;overflow-x:auto;margin:0;line-height:1.6">{{}}</pre>
+      </div>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #252836;display:flex;gap:20px;flex-wrap:wrap">
+      <div style="font-size:11px;color:#8892b0">
+        <span style="color:#50fa7b;font-weight:700">20 tools exposed:</span> memory, analytics, costs, guardrails, email, calendar, GitHub, Jira, Teams, KB search, full agent turn
+      </div>
+      <div style="font-size:11px;color:#8892b0">
+        <span style="color:#bd93f9;font-weight:700">HTTP mode:</span> run with <code style="background:#12131a;padding:1px 5px;border-radius:4px;color:#bd93f9">python mcp_server.py --http</code> (port 8765)
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Credentials modal -->
@@ -2007,6 +2040,40 @@ document.getElementById('creds-modal').addEventListener('click', e => {{
   if (e.target === document.getElementById('creds-modal')) closeModal();
 }});
 
+// ── MCP Config generator ────────────────��──────────────────────────────────
+(function buildMcpConfig() {{
+  // Detect the project root path from the current page URL host
+  const host = window.location.hostname || '127.0.0.1';
+  const cfg = {{
+    "mcpServers": {{
+      "work-assistant": {{
+        "command": "python",
+        "args": ["/path/to/work-assistant-agent/mcp_server.py"],
+        "env": {{
+          "DOTENV_PATH": "/path/to/work-assistant-agent/.env"
+        }}
+      }}
+    }}
+  }};
+  const block = document.getElementById('mcp-config-block');
+  if (block) block.textContent = JSON.stringify(cfg, null, 2);
+}})();
+
+async function copyMcpConfig() {{
+  const text = document.getElementById('mcp-config-block')?.textContent || '';
+  try {{
+    await navigator.clipboard.writeText(text);
+    const el = document.getElementById('mcp-copy-confirm');
+    if (el) {{ el.textContent = '✅ Copied!'; el.style.display='inline'; setTimeout(() => el.style.display='none', 2000); }}
+  }} catch(e) {{
+    // Fallback: select the pre block text
+    const range = document.createRange();
+    range.selectNode(document.getElementById('mcp-config-block'));
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+  }}
+}}
+
 load();
 </script>
 </body>
@@ -2108,8 +2175,16 @@ def stream():
 
 @app.route("/analytics")
 def analytics_route():
+    days = request.args.get("days_back", 7, type=int)
     from tools.analytics import get_analytics_summary
-    return jsonify(get_analytics_summary())
+    return jsonify(get_analytics_summary(days_back=days))
+
+
+@app.route("/costs")
+def costs_route():
+    days = request.args.get("days_back", 7, type=int)
+    from tools.analytics import get_cost_summary
+    return jsonify(get_cost_summary(days_back=days))
 
 
 @app.route("/upload-doc", methods=["POST"])
@@ -5402,6 +5477,29 @@ def analytics_page():
       <div id="tool-tags"><div class="empty-msg">Loading…</div></div>
     </div>
   </div>
+
+  <!-- ── Cost Tracking ─────────────────────────────────────────────────── -->
+  <div style="margin-bottom:8px;font-size:11px;font-weight:700;color:#8892b0;letter-spacing:.5px;text-transform:uppercase">💰 LLM API Cost Tracking</div>
+  <div class="stats-bar" style="margin-bottom:12px">
+    <div class="stat-card"><div class="stat-num" id="c-total" style="color:#ffb86c">$—</div><div class="stat-lbl">Total Spent</div></div>
+    <div class="stat-card"><div class="stat-num" id="c-calls" style="color:#64ffda">—</div><div class="stat-lbl">API Calls</div></div>
+    <div class="stat-card"><div class="stat-num" id="c-avg" style="color:#bd93f9">$—</div><div class="stat-lbl">Avg / Call</div></div>
+    <div class="stat-card"><div class="stat-num" id="c-tokens" style="color:#8892b0">—</div><div class="stat-lbl">Total Tokens</div></div>
+  </div>
+  <div class="an-grid">
+    <div class="an-card" style="grid-column:span 2">
+      <h3>Cost by Model</h3>
+      <div id="cost-bars"><div class="empty-msg">Loading…</div></div>
+    </div>
+    <div class="an-card">
+      <h3>Token Breakdown</h3>
+      <div id="token-breakdown"><div class="empty-msg">Loading…</div></div>
+    </div>
+    <div class="an-card">
+      <h3>Top Models Used</h3>
+      <div id="model-tags"><div class="empty-msg">Loading…</div></div>
+    </div>
+  </div>
 </div>
 <script>
 async function loadAnalytics(){{
@@ -5410,20 +5508,26 @@ async function loadAnalytics(){{
     const r=await fetch('/analytics?days_back='+days);
     const d=await r.json();
     const s=d.summary||d||{{}};
-    document.getElementById('a-total').textContent=s.total_requests||s.total_interactions||0;
-    document.getElementById('a-tools').textContent=Object.keys(s.tool_usage||s.tools||{{}}).length;
-    const avg=s.avg_per_day||(s.total_requests?Math.round(s.total_requests/parseInt(days)):0);
+    document.getElementById('a-total').textContent=s.total_requests||s.total_interactions||s.total_turns||0;
+    document.getElementById('a-tools').textContent=s.total_tool_calls||(s.top_tools?s.top_tools.length:Object.keys(s.tool_usage||s.tools||{{}}).length);
+    const total=s.total_requests||s.total_turns||0;
+    const avg=s.avg_per_day||(total?Math.round(total/parseInt(days)):0);
     document.getElementById('a-avg').textContent=avg||'—';
     // Peak hour
-    const hours=s.hourly_activity||s.by_hour||{{}};
+    const hours=s.hourly_breakdown||s.hourly_activity||s.by_hour||{{}};
     const peakH=Object.entries(hours).sort((a,b)=>b[1]-a[1])[0];
     document.getElementById('a-peak').textContent=peakH?peakH[0]+':00':'—';
-    // Tool bars
-    const tools=s.tool_usage||s.tools||{{}};
-    const toolEntries=Object.entries(tools).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    // Tool bars (top_tools array or tool_usage object)
+    let toolEntries=[];
+    if(s.top_tools&&s.top_tools.length){{
+      toolEntries=s.top_tools.map(t=>[t.tool,t.count]);
+    }}else{{
+      const tools=s.tool_usage||s.tools||{{}};
+      toolEntries=Object.entries(tools).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    }}
     const maxT=toolEntries[0]?toolEntries[0][1]:1;
     document.getElementById('tool-bars').innerHTML=toolEntries.length?toolEntries.map(([k,v])=>
-      `<div class="bar-row"><div class="bar-label" title="${{k}}">${{k.slice(-12)}}</div><div class="bar-track"><div class="bar-fill" style="width:${{Math.round(v/maxT*100)}}%"></div></div><div class="bar-val">${{v}}</div></div>`
+      `<div class="bar-row"><div class="bar-label" title="${{k}}">${{k.slice(-14)}}</div><div class="bar-track"><div class="bar-fill" style="width:${{Math.round(v/maxT*100)}}%"></div></div><div class="bar-val">${{v}}</div></div>`
     ).join(''):'<div class="empty-msg">No data yet</div>';
     // Tool tags
     document.getElementById('tool-tags').innerHTML=toolEntries.length?toolEntries.map(([k])=>`<span class="tool-tag">${{k}}</span>`).join(''):'<div class="empty-msg">No data</div>';
@@ -5438,7 +5542,32 @@ async function loadAnalytics(){{
     document.getElementById('top-queries').innerHTML=queries.length?queries.slice(0,8).map(q=>
       `<div style="font-size:12px;color:#d4d8e8;padding:5px 0;border-bottom:1px solid #1e2028">${{escH(typeof q==='string'?q:q.query||JSON.stringify(q))}}</div>`
     ).join(''):'<div class="empty-msg">No queries logged</div>';
-  }}catch(e){{document.querySelector('.an-grid').innerHTML=`<div style="grid-column:span 2"><div class="empty-msg" style="color:#ff5555">Error: ${{e.message}}</div></div>`;}}
+  }}catch(e){{console.error('Analytics error:',e);}}
+  // Load cost tracking separately
+  try{{
+    const rc=await fetch('/costs?days_back='+days);
+    const c=await rc.json();
+    document.getElementById('c-total').textContent=c.total_usd!=null?'$'+c.total_usd.toFixed(4):'$—';
+    document.getElementById('c-calls').textContent=c.total_calls||0;
+    document.getElementById('c-avg').textContent=c.avg_cost_per_call?'$'+c.avg_cost_per_call.toFixed(5):'$—';
+    const totalTok=(c.total_input_tokens||0)+(c.total_output_tokens||0);
+    document.getElementById('c-tokens').textContent=totalTok>1000?Math.round(totalTok/1000)+'K':totalTok||'—';
+    const models=c.by_model||[];
+    const maxC=models[0]?models[0].cost_usd:1;
+    document.getElementById('cost-bars').innerHTML=models.length?models.map(m=>
+      `<div class="bar-row">
+        <div class="bar-label" title="${{m.model}}">${{m.model.split('/').pop().slice(-16)}}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${{Math.round(m.cost_usd/maxC*100)}}%;background:#ffb86c"></div></div>
+        <div class="bar-val" style="color:#ffb86c;width:52px">${{'$'+m.cost_usd.toFixed(4)}}</div>
+      </div>`
+    ).join(''):'<div class="empty-msg">No cost data yet — start using the agent to track costs</div>';
+    document.getElementById('token-breakdown').innerHTML=c.total_calls?`
+      <div class="bar-row"><div class="bar-label">Input</div><div class="bar-track"><div class="bar-fill" style="width:60%;background:#64ffda"></div></div><div class="bar-val">${{(c.total_input_tokens/1000).toFixed(1)}}K</div></div>
+      <div class="bar-row"><div class="bar-label">Output</div><div class="bar-track"><div class="bar-fill" style="width:40%;background:#bd93f9"></div></div><div class="bar-val">${{(c.total_output_tokens/1000).toFixed(1)}}K</div></div>
+      <div style="margin-top:10px;font-size:11px;color:#8892b0">Total: ${{totalTok.toLocaleString()}} tokens across ${{c.total_calls}} calls</div>
+    `:'<div class="empty-msg">No token data yet</div>';
+    document.getElementById('model-tags').innerHTML=models.length?models.map(m=>`<span class="tool-tag" style="border-color:#ffb86c40;color:#ffb86c">${{escH(m.model.split('/').pop())}}</span>`).join(''):'<div class="empty-msg">No models used yet</div>';
+  }}catch(e){{document.getElementById('cost-bars').innerHTML=`<div class="empty-msg" style="color:#ff5555">Cost data unavailable</div>`;}}
 }}
 function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
 loadAnalytics();
@@ -5743,36 +5872,34 @@ def guardrails_page():
   <div id="guardrails-list"><div style="text-align:center;padding:40px;color:#8892b0">Loading…</div></div>
 </div>
 <script>
-const GR_META={{
-  pii_filter:{{icon:'🔒',desc:'Strips emails, phone numbers and personal identifiers from agent output before displaying it to you.'}},
-  injection_guard:{{icon:'💉',desc:'Detects and blocks prompt injection attacks — attempts by malicious content to hijack the agent.'}},
-  rate_limit:{{icon:'🚦',desc:'Caps the number of tool calls per agent turn to prevent runaway loops or excessive API usage.'}},
-  write_confirm:{{icon:'✏️',desc:'Requires your confirmation before the agent performs any write operations (send email, create issue, etc.).'}}
-}};
 async function loadGuardrails(){{
   try{{
     const r=await fetch('/guardrails'); const d=await r.json();
-    const items=d.guardrails||d||[];
+    const items=Array.isArray(d)?d:(d.guardrails||[]);
     const on=items.filter(g=>g.enabled).length;
     document.getElementById('gr-on').textContent=on;
     document.getElementById('gr-off').textContent=items.length-on;
-    document.getElementById('guardrails-list').innerHTML=items.map(g=>{{
-      const meta=GR_META[g.name]||{{icon:'🛡',desc:g.description||''}};
+    document.getElementById('guardrails-list').innerHTML=items.length?items.map(g=>{{
+      const icon=g.icon||'🛡';
+      const label=g.label||g.name.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+      const desc=g.description||'';
+      const optIn=g.name==='topic_scope';
       return `<div class="gr-card">
-        <div class="gr-icon">${{meta.icon}}</div>
+        <div class="gr-icon">${{icon}}</div>
         <div class="gr-info">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-            <div class="gr-name">${{escH(g.name.replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase()))}}</div>
+            <div class="gr-name">${{escH(label)}}</div>
             <span class="${{g.enabled?'on-badge':'off-badge'}}" id="badge-${{g.name}}">${{g.enabled?'ON':'OFF'}}</span>
+            ${{optIn?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;background:#1c2030;color:#bd93f9;border:1px solid #3a2060">Opt-in</span>':''}}
           </div>
-          <div class="gr-desc">${{meta.desc||escH(g.description||'')}}</div>
+          <div class="gr-desc">${{escH(desc)}}</div>
         </div>
         <label class="gr-toggle" title="Toggle ${{g.name}}">
           <input type="checkbox" ${{g.enabled?'checked':''}} onchange="toggleGR('${{g.name}}',this)">
           <span class="gr-slider"></span>
         </label>
       </div>`;
-    }}).join('');
+    }}).join(''):'<div style="text-align:center;padding:40px;color:#8892b0">No guardrails configured</div>';
   }}catch(e){{document.getElementById('guardrails-list').innerHTML=`<div style="text-align:center;padding:40px;color:#ff5555">Error: ${{e.message}}</div>`;}}
 }}
 async function toggleGR(name, checkbox){{
