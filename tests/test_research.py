@@ -119,3 +119,45 @@ def test_cache_expires(tmp_path, monkeypatch):
 
     result = get_cached_research("old topic", max_age_hours=24)
     assert result is None
+
+
+# ── Task 5: deep_research ──────────────────────────────────────────────────
+
+def test_deep_research_returns_expected_keys():
+    from tools.browser_tool import deep_research
+    from unittest.mock import patch
+    with patch("tools.browser_tool.search_web") as mock_search, \
+         patch("tools.browser_tool._parallel_browse") as mock_browse, \
+         patch("tools.rag.cache_research"), \
+         patch("tools.rag.get_cached_research", return_value=None):
+
+        mock_search.return_value = {
+            "results": [
+                {"title": "Quantum computing basics", "url": "https://example.com/q1", "snippet": "Quantum computers use qubits."},
+                {"title": "IBM Quantum", "url": "https://ibm.com/quantum", "snippet": "IBM builds quantum hardware."},
+                {"title": "Quantum explained", "url": "https://reuters.com/quantum", "snippet": "News article on quantum."},
+            ]
+        }
+        mock_browse.return_value = [
+            {"url": "https://example.com/q1",    "text": "Quantum computers use qubits to compute.", "title": "Quantum basics"},
+            {"url": "https://ibm.com/quantum",    "text": "IBM builds quantum hardware with 100+ qubits.", "title": "IBM Quantum"},
+            {"url": "https://reuters.com/quantum","text": "Quantum computing is growing rapidly.", "title": "Quantum news"},
+        ]
+
+        result = deep_research("quantum computing", depth=1)
+
+    assert "topic" in result
+    assert "summary" in result
+    assert "sources" in result
+    assert "credibility_summary" in result
+    assert len(result["sources"]) > 0
+
+
+def test_deep_research_returns_cache_on_hit():
+    from tools.browser_tool import deep_research
+    from unittest.mock import patch
+    cached = {"topic": "ai news", "summary": "Cached summary", "sources": [], "credibility_summary": {}}
+    with patch("tools.rag.get_cached_research", return_value=cached):
+        result = deep_research("ai news", depth=2)
+    assert result["summary"] == "Cached summary"
+    assert result.get("from_cache") is True

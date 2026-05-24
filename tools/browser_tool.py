@@ -351,6 +351,163 @@ def search_web(query: str, max_results: int = 5) -> dict:
             browser.close()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DEEP RESEARCH — multi-step: search → read → synthesise → loop
+# ══════════════════════════════════════════════════════════════════════════════
+
+def deep_research(
+    topic: str,
+    depth: int = 2,
+    results_per_search: int = 5,
+    pages_per_depth: int = 3,
+    max_chars_per_page: int = 5000,
+    use_cache: bool = True,
+    cache_hours: int = 24,
+) -> dict:
+    """
+    Agent-callable: autonomously research a topic and return a synthesised summary.
+
+    Workflow per depth level:
+      1. Search DuckDuckGo for the topic (+ follow-up angles from prior round)
+      2. Score all results by credibility, pick the best `pages_per_depth`
+      3. Fetch those pages IN PARALLEL using _parallel_browse
+      4. Concatenate all extracted text into a research corpus
+      5. After all depth levels, build and return a structured result
+
+    Args:
+        topic:              What to research
+        depth:              How many search-read rounds to run (default 2)
+        results_per_search: DuckDuckGo results per round (default 5)
+        pages_per_depth:    How many of those results to actually read (default 3)
+        max_chars_per_page: Character limit per page read
+        use_cache:          Check research cache first (default True)
+        cache_hours:        How long cache entries are valid (default 24h)
+
+    Returns dict:
+        {
+            "topic":               str,
+            "summary":             str,   # Combined text corpus
+            "sources":             list,  # [{title, url, snippet, tier, score, round}]
+            "credibility_summary": dict,  # {"HIGH": n, "MEDIUM": n, "LOW": n, "UNKNOWN": n}
+            "search_queries":      list,  # All queries that were run
+            "depth_used":          int,
+            "from_cache":          bool,
+        }
+    """
+    # ── Cache check ──────────────────────────────────────────────────────────
+    if use_cache:
+        try:
+            from tools.rag import get_cached_research, cache_research
+            cached = get_cached_research(topic, max_age_hours=cache_hours)
+            if cached:
+                cached["from_cache"] = True
+                return cached
+        except Exception:
+            pass  # Cache unavailable — continue without it
+
+    all_sources: list[dict] = []
+    all_text_chunks: list[str] = []
+    search_queries: list[str] = [topic]
+    credibility_counts: dict[str, int] = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
+
+    current_queries = [topic]
+
+    for round_num in range(depth):
+        query = current_queries[round_num] if round_num < len(current_queries) else topic
+
+        # 1. Search
+        search_result = search_web(query, max_results=results_per_search)
+        raw_results   = search_result.get("results", [])
+
+        if not raw_results:
+            break
+
+        # 2. Score and rank by credibility
+        scored = []
+        for r in raw_results:
+            cred = _score_credibility(r.get("url", ""))
+            scored.append({**r, **cred})
+
+        tier_order = {"HIGH": 0, "MEDIUM": 1, "UNKNOWN": 2, "LOW": 3}
+        scored.sort(key=lambda x: tier_order.get(x.get("tier", "UNKNOWN"), 2))
+
+        # Pick top pages to actually read
+        to_read       = scored[:pages_per_depth]
+        urls_to_fetch = [r["url"] for r in to_read if r.get("url")]
+
+        # 3. Parallel fetch
+        if urls_to_fetch:
+            pages = _parallel_browse(
+                urls_to_fetch,
+                extract="text",
+                wait_seconds=2,
+                max_chars=max_chars_per_page,
+                max_workers=min(4, len(urls_to_fetch)),
+            )
+            url_to_page = {p["url"]: p for p in pages}
+        else:
+            url_to_page = {}
+
+        # 4. Collect results
+        for r in to_read:
+            url  = r.get("url", "")
+            page = url_to_page.get(url, {})
+            text = page.get("text") or r.get("snippet", "")
+
+            tier = r.get("tier", "UNKNOWN")
+            credibility_counts[tier] = credibility_counts.get(tier, 0) + 1
+
+            all_sources.append({
+                "title":   page.get("title") or r.get("title", ""),
+                "url":     url,
+                "snippet": r.get("snippet", ""),
+                "tier":    tier,
+                "score":   r.get("score", 0.5),
+                "round":   round_num + 1,
+            })
+
+            if text:
+                all_text_chunks.append(
+                    f"--- Source: {r.get('title', url)} ({tier}) ---\n{text}\n"
+                )
+
+        # 5. Build follow-up query for next round
+        if round_num + 1 < depth:
+            follow_ups = [
+                f"{topic} explained in detail",
+                f"{topic} latest developments 2025",
+                f"{topic} research findings",
+                f"{topic} practical applications",
+            ]
+            next_query = follow_ups[round_num % len(follow_ups)]
+            current_queries.append(next_query)
+            search_queries.append(next_query)
+
+    combined_text = "\n\n".join(all_text_chunks)
+    if not combined_text:
+        combined_text = f"No content could be retrieved for topic: {topic}"
+
+    result = {
+        "topic":               topic,
+        "summary":             combined_text,
+        "sources":             all_sources,
+        "credibility_summary": credibility_counts,
+        "search_queries":      search_queries,
+        "depth_used":          depth,
+        "from_cache":          False,
+    }
+
+    # Cache the result
+    if use_cache:
+        try:
+            from tools.rag import cache_research
+            cache_research(topic, result)
+        except Exception:
+            pass
+
+    return result
+
+
 def take_screenshot_url(url: str, output_path: str) -> dict:
     """
     Take a full-page screenshot of a URL and save it.
