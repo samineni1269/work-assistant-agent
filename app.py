@@ -2528,8 +2528,14 @@ _PAGE_NAV = """
     <a href="/jira-page" class="nav-link-tool">📋 Jira</a>
     <a href="/linear-page" class="nav-link-tool">⚡ Linear</a>
     <a href="/slack-page" class="nav-link-tool">💬 Slack</a>
+    <a href="/teams-page" class="nav-link-tool">👥 Teams</a>
     <a href="/notion-page" class="nav-link-tool">📓 Notion</a>
+    <a href="/confluence-page" class="nav-link-tool">📘 Confluence</a>
+    <a href="/sharepoint-page" class="nav-link-tool">🗂 SharePoint</a>
+    <a href="/excel-page" class="nav-link-tool">📊 Excel</a>
     <a href="/meetings-page" class="nav-link-tool">📹 Meetings</a>
+    <a href="/research-page" class="nav-link-tool">🔭 Research</a>
+    <a href="/briefing-page" class="nav-link-tool">📨 Briefing</a>
     <a href="/webhooks-page" class="nav-link-tool">🪝 Webhooks</a>
     <a href="/meeting-prep-page" class="nav-link-tool">🗓 Meeting Prep</a>
   </div>
@@ -6073,6 +6079,898 @@ load();
 loadCorrections();
 </script>
 </body></html>"""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TEAMS — API routes + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/teams/chats")
+def api_teams_chats():
+    try:
+        from tools.ms365 import get_teams_chats
+        return jsonify({"chats": get_teams_chats(max_results=30)})
+    except Exception as e:
+        return jsonify({"chats": [], "error": str(e)})
+
+@app.route("/teams/chat-messages")
+def api_teams_chat_messages():
+    chat_id = request.args.get("chat_id", "")
+    try:
+        from tools.ms365 import get_chat_messages
+        return jsonify({"messages": get_chat_messages(chat_id, max_results=30)})
+    except Exception as e:
+        return jsonify({"messages": [], "error": str(e)})
+
+@app.route("/teams/send-dm", methods=["POST"])
+def api_teams_send_dm():
+    data = request.json or {}
+    try:
+        from tools.ms365 import send_teams_message
+        result = send_teams_message(data["chat_id"], data["message"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/teams/list")
+def api_teams_list():
+    try:
+        from tools.ms365 import list_teams
+        return jsonify({"teams": list_teams()})
+    except Exception as e:
+        return jsonify({"teams": [], "error": str(e)})
+
+@app.route("/teams/channels")
+def api_teams_channels():
+    team_id = request.args.get("team_id", "")
+    try:
+        from tools.ms365 import _graph
+        data = _graph("GET", f"/teams/{team_id}/channels?$select=id,displayName")
+        return jsonify({"channels": [{"id": c["id"], "name": c["displayName"]} for c in data.get("value", [])]})
+    except Exception as e:
+        return jsonify({"channels": [], "error": str(e)})
+
+@app.route("/teams/channel-messages")
+def api_teams_channel_messages():
+    team_id   = request.args.get("team_id", "")
+    channel_id = request.args.get("channel_id", "")
+    try:
+        from tools.ms365 import get_channel_messages
+        return jsonify({"messages": get_channel_messages(team_id, channel_id, max_results=30)})
+    except Exception as e:
+        return jsonify({"messages": [], "error": str(e)})
+
+@app.route("/teams/post-channel", methods=["POST"])
+def api_teams_post_channel():
+    data = request.json or {}
+    try:
+        from tools.ms365 import post_channel_message
+        result = post_channel_message(data["team_id"], data["channel_id"], data["message"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/teams-page")
+def teams_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Teams — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.teams-layout{{display:grid;grid-template-columns:260px 1fr;gap:16px;height:calc(100vh - 195px)}}
+.teams-sidebar{{background:#1a1c24;border:1px solid #252836;border-radius:10px;overflow-y:auto;padding:8px 0}}
+.teams-main{{background:#1a1c24;border:1px solid #252836;border-radius:10px;display:flex;flex-direction:column}}
+.t-item{{padding:8px 14px;cursor:pointer;font-size:13px;color:#8892b0;border-radius:6px;margin:0 6px;display:flex;flex-direction:column;gap:2px}}
+.t-item:hover{{background:#1e2028;color:#d4d8e8}}
+.t-item.active{{background:#1c2540;color:#64ffda}}
+.t-name{{font-weight:600;font-size:13px}}
+.t-sub{{font-size:11px;color:#8892b0}}
+.msg-list{{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}}
+.msg-bubble{{display:flex;gap:10px;align-items:flex-start}}
+.msg-avatar{{width:32px;height:32px;border-radius:8px;background:#1c2540;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}}
+.msg-body{{flex:1;min-width:0}}
+.msg-user{{font-size:12px;font-weight:700;color:#64ffda}}
+.msg-time{{font-size:11px;color:#8892b0;margin-left:8px}}
+.msg-text{{font-size:13px;color:#d4d8e8;margin-top:3px;word-break:break-word}}
+.send-bar{{padding:12px;border-top:1px solid #252836;display:flex;gap:8px}}
+.send-bar input{{flex:1;background:#12131a;border:1px solid #252836;border-radius:6px;padding:8px 12px;color:#d4d8e8;font-size:13px}}
+.send-bar input:focus{{outline:none;border-color:#64ffda}}
+.t-hdr{{padding:12px 14px;border-bottom:1px solid #252836;font-size:13px;font-weight:700;color:#d4d8e8;display:flex;justify-content:space-between;align-items:center}}
+.tab-row{{display:flex;gap:6px;padding:8px 8px 0;margin-bottom:12px}}
+.stab{{padding:5px 12px;border-radius:16px;border:1px solid #252836;background:#12131a;color:#8892b0;font-size:11px;cursor:pointer}}
+.stab.active{{background:#1c2540;color:#64ffda;border-color:#243060}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+.sid-hdr{{padding:8px 14px;font-size:10px;font-weight:700;color:#3a4060;letter-spacing:.5px;text-transform:uppercase}}
+.back-btn{{font-size:11px;color:#64ffda;cursor:pointer;padding:4px 8px;border-radius:4px;border:1px solid #1e3050;background:none;margin:4px 6px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap" style="padding-bottom:0">
+  <div class="page-hdr">
+    <div><div class="page-title">💬 Teams</div><div class="page-subtitle">Chats, channels and messages</div></div>
+  </div>
+  <div class="tab-row">
+    <button class="stab active" onclick="switchTab('chats',this)">💬 Chats</button>
+    <button class="stab" onclick="switchTab('teams',this)">👥 Teams &amp; Channels</button>
+  </div>
+  <div class="teams-layout">
+    <div class="teams-sidebar" id="t-sidebar"><div class="empty-msg">Loading…</div></div>
+    <div class="teams-main">
+      <div class="t-hdr"><span id="t-title">Select a chat</span><button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836;font-size:11px" onclick="refreshMsgs()">↻</button></div>
+      <div class="msg-list" id="t-msgs"><div class="empty-msg">Pick a chat or channel to see messages</div></div>
+      <div class="send-bar">
+        <input id="t-input" placeholder="Send a message…" onkeydown="if(event.key==='Enter')sendMsg()">
+        <button class="btn btn-primary" onclick="sendMsg()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let _tmode='chats',_activeId=null,_activeTeamId=null,_activeChannelId=null;
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+function switchTab(mode,el){{
+  _tmode=mode;_activeId=null;_activeTeamId=null;_activeChannelId=null;
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));el.classList.add('active');
+  document.getElementById('t-msgs').innerHTML='<div class="empty-msg">Pick a chat or channel to see messages</div>';
+  document.getElementById('t-title').textContent='Select a '+(mode==='chats'?'chat':'channel');
+  if(mode==='chats')loadChats();else loadTeamsList();
+}}
+async function loadChats(){{
+  document.getElementById('t-sidebar').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/teams/chats');const d=await r.json();
+    const chats=d.chats||[];
+    if(!chats.length){{document.getElementById('t-sidebar').innerHTML='<div class="empty-msg">No chats found</div>';return;}}
+    document.getElementById('t-sidebar').innerHTML='<div class="sid-hdr">Chats</div>'+chats.map(c=>{{
+      const name=escH(c.topic||c.chatType||'Chat');
+      const upd=c.lastUpdatedDateTime?new Date(c.lastUpdatedDateTime).toLocaleDateString('en-GB',{{day:'2-digit',month:'short'}}):'';
+      return `<div class="t-item" id="ci-${{escH(c.id)}}" onclick="selectChat('${{escH(c.id)}}','${{name}}')">
+        <div class="t-name">${{name}}</div><div class="t-sub">${{escH(c.chatType||'')}} · ${{upd}}</div></div>`;
+    }}).join('');
+    if(d.error)document.getElementById('t-sidebar').innerHTML+=`<div style="padding:8px 14px;font-size:11px;color:#ff5555">${{escH(d.error)}}</div>`;
+  }}catch(e){{document.getElementById('t-sidebar').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+async function loadTeamsList(){{
+  document.getElementById('t-sidebar').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/teams/list');const d=await r.json();
+    const teams=d.teams||[];
+    if(!teams.length){{document.getElementById('t-sidebar').innerHTML='<div class="empty-msg">No teams found</div>';return;}}
+    document.getElementById('t-sidebar').innerHTML='<div class="sid-hdr">Teams</div>'+teams.map(t=>{{
+      const name=escH(t.displayName||t.name||'Team');
+      return `<div class="t-item" onclick="loadChannels('${{escH(t.id)}}','${{name}}')">
+        <div class="t-name">👥 ${{name}}</div><div class="t-sub">${{escH(t.description||'')}}</div></div>`;
+    }}).join('');
+    if(d.error)document.getElementById('t-sidebar').innerHTML+=`<div style="padding:8px 14px;font-size:11px;color:#ff5555">${{escH(d.error)}}</div>`;
+  }}catch(e){{document.getElementById('t-sidebar').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+async function loadChannels(teamId,teamName){{
+  _activeTeamId=teamId;
+  document.getElementById('t-sidebar').innerHTML='<div class="empty-msg">Loading channels…</div>';
+  try{{
+    const r=await fetch('/teams/channels?team_id='+encodeURIComponent(teamId));const d=await r.json();
+    const channels=d.channels||[];
+    document.getElementById('t-sidebar').innerHTML=
+      `<button class="back-btn" onclick="loadTeamsList()">← Back</button><div class="sid-hdr">${{escH(teamName)}}</div>`+
+      (channels.length?channels.map(c=>`<div class="t-item" onclick="selectChannel('${{escH(c.id)}}','${{escH(c.name)}}')">
+        <div class="t-name"># ${{escH(c.name)}}</div></div>`).join(''):'<div class="empty-msg">No channels</div>');
+  }}catch(e){{document.getElementById('t-sidebar').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+function selectChat(id,name){{
+  _activeId=id;_tmode='chats';
+  document.querySelectorAll('.t-item').forEach(el=>el.classList.remove('active'));
+  const el=document.getElementById('ci-'+id);if(el)el.classList.add('active');
+  document.getElementById('t-title').textContent=name;
+  refreshMsgs();
+}}
+function selectChannel(channelId,name){{
+  _activeChannelId=channelId;
+  document.getElementById('t-title').textContent='# '+name;
+  refreshMsgs();
+}}
+async function refreshMsgs(){{
+  const msgEl=document.getElementById('t-msgs');
+  msgEl.innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    let d;
+    if(_tmode==='chats'&&_activeId){{
+      const r=await fetch('/teams/chat-messages?chat_id='+encodeURIComponent(_activeId));d=await r.json();
+    }}else if(_tmode==='teams'&&_activeTeamId&&_activeChannelId){{
+      const r=await fetch('/teams/channel-messages?team_id='+encodeURIComponent(_activeTeamId)+'&channel_id='+encodeURIComponent(_activeChannelId));d=await r.json();
+    }}else{{msgEl.innerHTML='<div class="empty-msg">Select a chat or channel</div>';return;}}
+    const msgs=d.messages||[];
+    msgEl.innerHTML=msgs.length?msgs.map(m=>{{
+      const user=escH(m.sender||m.from||'?');
+      const text=escH(m.body||m.content||m.text||'');
+      const time=m.createdDateTime?new Date(m.createdDateTime).toLocaleTimeString('en-GB',{{hour:'2-digit',minute:'2-digit'}}):'';
+      return `<div class="msg-bubble"><div class="msg-avatar">${{user[0]||'?'}}</div>
+        <div class="msg-body"><div><span class="msg-user">${{user}}</span><span class="msg-time">${{time}}</span></div>
+        <div class="msg-text">${{text}}</div></div></div>`;
+    }}).join(''):'<div class="empty-msg">No messages</div>';
+    msgEl.scrollTop=msgEl.scrollHeight;
+  }}catch(e){{msgEl.innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+async function sendMsg(){{
+  const inp=document.getElementById('t-input');const msg=inp.value.trim();if(!msg)return;
+  inp.value='';
+  try{{
+    let url,body;
+    if(_tmode==='chats'&&_activeId){{url='/teams/send-dm';body={{chat_id:_activeId,message:msg}};}}
+    else if(_tmode==='teams'&&_activeTeamId&&_activeChannelId){{url='/teams/post-channel';body={{team_id:_activeTeamId,channel_id:_activeChannelId,message:msg}};}}
+    else{{alert('Select a chat or channel first');inp.value=msg;return;}}
+    const r=await fetch(url,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
+    const d=await r.json();
+    if(d.status==='error'){{alert('Send failed: '+d.message);inp.value=msg;return;}}
+    await refreshMsgs();
+  }}catch(e){{alert('Error: '+e.message);inp.value=msg;}}
+}}
+loadChats();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SHAREPOINT — API routes + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/sharepoint/sites")
+def api_sharepoint_sites():
+    try:
+        from tools.ms365 import get_sharepoint_sites
+        return jsonify({"sites": get_sharepoint_sites()})
+    except Exception as e:
+        return jsonify({"sites": [], "error": str(e)})
+
+@app.route("/sharepoint/files")
+def api_sharepoint_files():
+    site_id = request.args.get("site_id", "")
+    folder  = request.args.get("folder", "")
+    try:
+        from tools.ms365 import list_sharepoint_files
+        return jsonify({"files": list_sharepoint_files(site_id, folder or None)})
+    except Exception as e:
+        return jsonify({"files": [], "error": str(e)})
+
+@app.route("/sharepoint/search-files")
+def api_sharepoint_search_files():
+    q       = request.args.get("q", "")
+    site_id = request.args.get("site_id", "")
+    try:
+        from tools.ms365 import search_sharepoint
+        return jsonify({"results": search_sharepoint(q, site_id or None)})
+    except Exception as e:
+        return jsonify({"results": [], "error": str(e)})
+
+@app.route("/sharepoint/upload", methods=["POST"])
+def api_sharepoint_upload():
+    data = request.json or {}
+    try:
+        from tools.ms365 import upload_file_to_sharepoint
+        result = upload_file_to_sharepoint(data["site_id"], data["file_path"], data.get("dest_folder", ""))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/sharepoint-page")
+def sharepoint_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SharePoint — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.sp-layout{{display:grid;grid-template-columns:260px 1fr;gap:16px;height:calc(100vh - 195px)}}
+.sp-sidebar{{background:#1a1c24;border:1px solid #252836;border-radius:10px;overflow-y:auto;padding:8px 0}}
+.sp-main{{background:#1a1c24;border:1px solid #252836;border-radius:10px;display:flex;flex-direction:column;overflow:hidden}}
+.sp-item{{padding:8px 14px;cursor:pointer;font-size:13px;color:#8892b0;border-radius:6px;margin:0 6px}}
+.sp-item:hover{{background:#1e2028;color:#d4d8e8}}
+.sp-item.active{{background:#1c2540;color:#64ffda}}
+.sp-hdr{{padding:12px 14px;border-bottom:1px solid #252836;font-size:13px;font-weight:700;color:#d4d8e8;display:flex;justify-content:space-between;align-items:center;gap:8px}}
+.sp-hdr input{{flex:1;background:#12131a;border:1px solid #252836;border-radius:6px;padding:6px 10px;color:#d4d8e8;font-size:12px}}
+.sp-hdr input:focus{{outline:none;border-color:#64ffda}}
+.file-grid{{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:6px}}
+.file-row{{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#12131a;border-radius:6px;font-size:13px;color:#d4d8e8}}
+.file-icon{{font-size:18px;flex-shrink:0}}
+.file-name{{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.file-size{{font-size:11px;color:#8892b0;flex-shrink:0}}
+.sid-hdr{{padding:8px 14px;font-size:10px;font-weight:700;color:#3a4060;letter-spacing:.5px;text-transform:uppercase}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap" style="padding-bottom:0">
+  <div class="page-hdr">
+    <div><div class="page-title">📁 SharePoint</div><div class="page-subtitle">Sites, files and search</div></div>
+  </div>
+  <div class="sp-layout">
+    <div class="sp-sidebar" id="sp-sidebar"><div class="empty-msg">Loading sites…</div></div>
+    <div class="sp-main">
+      <div class="sp-hdr">
+        <span id="sp-site-name" style="flex-shrink:0;font-size:13px">Select a site</span>
+        <input id="sp-search" placeholder="Search files…" onkeydown="if(event.key==='Enter')searchFiles()">
+        <button class="btn btn-primary" style="font-size:12px;padding:6px 12px" onclick="searchFiles()">Search</button>
+        <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836;font-size:11px" onclick="refreshFiles()">↻</button>
+      </div>
+      <div class="file-grid" id="sp-files"><div class="empty-msg">Select a site to browse files</div></div>
+    </div>
+  </div>
+</div>
+<script>
+let _spActiveSite=null;
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+function fileIcon(name){{const ext=(name||'').split('.').pop().toLowerCase();const icons={{xlsx:'📊',xls:'📊',docx:'📝',doc:'📝',pptx:'📊',ppt:'📊',pdf:'📄',png:'🖼',jpg:'🖼',jpeg:'🖼',mp4:'🎬',zip:'🗜',txt:'📃'}};return icons[ext]||'📄';}}
+function fmtSize(b){{if(!b)return'';b=parseInt(b);if(b>1e6)return(b/1e6).toFixed(1)+'MB';if(b>1e3)return(b/1e3).toFixed(0)+'KB';return b+'B';}}
+async function loadSites(){{
+  document.getElementById('sp-sidebar').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/sharepoint/sites');const d=await r.json();
+    const sites=d.sites||[];
+    if(!sites.length){{document.getElementById('sp-sidebar').innerHTML='<div class="empty-msg">No sites found</div>';return;}}
+    document.getElementById('sp-sidebar').innerHTML='<div class="sid-hdr">Sites</div>'+
+      sites.map(s=>`<div class="sp-item" onclick="selectSite(${{JSON.stringify(s.id||s.siteId||'')}}, ${{JSON.stringify(s.displayName||s.name||'Site')}})">
+        🌐 ${{escH(s.displayName||s.name||s.url||'Site')}}</div>`).join('');
+  }}catch(e){{document.getElementById('sp-sidebar').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+function selectSite(id,name){{
+  _spActiveSite=id;
+  document.getElementById('sp-site-name').textContent=name;
+  refreshFiles();
+}}
+async function refreshFiles(){{
+  if(!_spActiveSite)return;
+  document.getElementById('sp-files').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/sharepoint/files?site_id='+encodeURIComponent(_spActiveSite));const d=await r.json();
+    renderFiles(d.files||[]);
+    if(d.error)document.getElementById('sp-files').innerHTML+=`<div style="padding:8px;font-size:11px;color:#ff5555">${{escH(d.error)}}</div>`;
+  }}catch(e){{document.getElementById('sp-files').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+async function searchFiles(){{
+  const q=document.getElementById('sp-search').value.trim();if(!q)return;
+  document.getElementById('sp-files').innerHTML='<div class="empty-msg">Searching…</div>';
+  try{{
+    let url='/sharepoint/search-files?q='+encodeURIComponent(q);
+    if(_spActiveSite)url+='&site_id='+encodeURIComponent(_spActiveSite);
+    const r=await fetch(url);const d=await r.json();
+    renderFiles(d.results||[]);
+  }}catch(e){{document.getElementById('sp-files').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+function renderFiles(files){{
+  const el=document.getElementById('sp-files');
+  el.innerHTML=files.length?files.map(f=>{{
+    const name=escH(f.name||f.fileName||'?');
+    const size=fmtSize(f.size);
+    const url=f.webUrl||f.url||'#';
+    return `<div class="file-row"><div class="file-icon">${{fileIcon(name)}}</div>
+      <div class="file-name"><a href="${{escH(url)}}" target="_blank" style="color:#d4d8e8;text-decoration:none">${{name}}</a></div>
+      <div class="file-size">${{size}}</div></div>`;
+  }}).join(''):'<div class="empty-msg">No files found</div>';
+}}
+loadSites();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXCEL — API routes + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/excel/sheets")
+def api_excel_sheets():
+    workbook = request.args.get("workbook", "")
+    try:
+        from tools.ms365 import list_excel_sheets
+        return jsonify({"sheets": list_excel_sheets(workbook)})
+    except Exception as e:
+        return jsonify({"sheets": [], "error": str(e)})
+
+@app.route("/excel/read")
+def api_excel_read():
+    workbook = request.args.get("workbook", "")
+    sheet    = request.args.get("sheet", "Sheet1")
+    try:
+        from tools.ms365 import read_excel_sheet
+        return jsonify({"data": read_excel_sheet(workbook, sheet)})
+    except Exception as e:
+        return jsonify({"data": [], "error": str(e)})
+
+@app.route("/excel/append", methods=["POST"])
+def api_excel_append():
+    data = request.json or {}
+    try:
+        from tools.ms365 import append_excel_row
+        result = append_excel_row(data["workbook"], data["sheet"], data["values"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/excel/write-cell", methods=["POST"])
+def api_excel_write_cell():
+    data = request.json or {}
+    try:
+        from tools.ms365 import write_excel_cell
+        result = write_excel_cell(data["workbook"], data["sheet"], data["cell"], data["value"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/excel-page")
+def excel_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Excel — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.xl-controls{{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}}
+.xl-controls input{{background:#12131a;border:1px solid #252836;border-radius:6px;padding:7px 11px;color:#d4d8e8;font-size:13px}}
+.xl-controls input:focus{{outline:none;border-color:#64ffda}}
+.xl-table-wrap{{background:#1a1c24;border:1px solid #252836;border-radius:10px;overflow:auto;flex:1;min-height:200px}}
+.xl-table{{border-collapse:collapse;width:100%;font-size:12px}}
+.xl-table th{{background:#12131a;color:#64ffda;padding:8px 12px;text-align:left;border-bottom:1px solid #252836;font-weight:600;white-space:nowrap}}
+.xl-table td{{padding:7px 12px;border-bottom:1px solid #1e2030;color:#d4d8e8;white-space:nowrap}}
+.xl-table tr:hover td{{background:#1e2028}}
+.append-form{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:16px;margin-top:14px}}
+.append-form h3{{font-size:13px;color:#d4d8e8;margin:0 0 10px}}
+.append-row{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+.append-row input{{flex:1;min-width:120px;background:#12131a;border:1px solid #252836;border-radius:6px;padding:7px 11px;color:#d4d8e8;font-size:13px}}
+.append-row input:focus{{outline:none;border-color:#64ffda}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">📊 Excel</div><div class="page-subtitle">OneDrive workbooks and sheets</div></div>
+  </div>
+  <div class="xl-controls">
+    <input id="xl-workbook" placeholder="Workbook name e.g. AgentTest.xlsx" style="min-width:220px" onkeydown="if(event.key==='Enter')loadSheets()">
+    <button class="btn btn-primary" onclick="loadSheets()">Load</button>
+    <select id="xl-sheet" style="background:#12131a;border:1px solid #252836;border-radius:6px;padding:7px 11px;color:#d4d8e8;font-size:13px" onchange="loadSheet()">
+      <option value="">Select sheet…</option>
+    </select>
+    <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836;font-size:11px" onclick="loadSheet()">↻</button>
+  </div>
+  <div class="xl-table-wrap" id="xl-table-wrap"><div class="empty-msg">Enter a workbook name and click Load</div></div>
+  <div class="append-form" id="xl-append" style="display:none">
+    <h3>➕ Append Row</h3>
+    <div class="append-row">
+      <input id="xl-v1" placeholder="Value 1">
+      <input id="xl-v2" placeholder="Value 2">
+      <input id="xl-v3" placeholder="Value 3">
+      <input id="xl-v4" placeholder="Value 4">
+      <button class="btn btn-primary" onclick="appendRow()">Append</button>
+    </div>
+    <div id="xl-append-status" style="font-size:12px;color:#64ffda;margin-top:8px"></div>
+  </div>
+</div>
+<script>
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+async function loadSheets(){{
+  const wb=document.getElementById('xl-workbook').value.trim();if(!wb)return;
+  try{{
+    const r=await fetch('/excel/sheets?workbook='+encodeURIComponent(wb));const d=await r.json();
+    const sel=document.getElementById('xl-sheet');
+    sel.innerHTML='<option value="">Select sheet…</option>'+(d.sheets||[]).map(s=>`<option value="${{escH(s)}}">${{escH(s)}}</option>`).join('');
+    if(d.error){{document.getElementById('xl-table-wrap').innerHTML=`<div class="empty-msg" style="color:#ff5555">${{escH(d.error)}}</div>`;return;}}
+    if(d.sheets&&d.sheets.length){{sel.value=d.sheets[0];loadSheet();}}
+  }}catch(e){{document.getElementById('xl-table-wrap').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+async function loadSheet(){{
+  const wb=document.getElementById('xl-workbook').value.trim();
+  const sh=document.getElementById('xl-sheet').value;if(!wb||!sh)return;
+  document.getElementById('xl-table-wrap').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch(`/excel/read?workbook=${{encodeURIComponent(wb)}}&sheet=${{encodeURIComponent(sh)}}`);const d=await r.json();
+    const rows=d.data||[];
+    if(!rows.length){{document.getElementById('xl-table-wrap').innerHTML='<div class="empty-msg">Sheet is empty</div>';document.getElementById('xl-append').style.display='block';return;}}
+    const headers=rows[0];const body=rows.slice(1);
+    document.getElementById('xl-table-wrap').innerHTML=`<table class="xl-table">
+      <thead><tr>${{headers.map(h=>`<th>${{escH(String(h||''))}}</th>`).join('')}}</tr></thead>
+      <tbody>${{body.map(row=>`<tr>${{headers.map((_,i)=>`<td>${{escH(String(row[i]??''))}}</td>`).join('')}}</tr>`).join('')}}</tbody>
+    </table>`;
+    document.getElementById('xl-append').style.display='block';
+  }}catch(e){{document.getElementById('xl-table-wrap').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+async function appendRow(){{
+  const wb=document.getElementById('xl-workbook').value.trim();
+  const sh=document.getElementById('xl-sheet').value;
+  const vals=[1,2,3,4].map(i=>document.getElementById('xl-v'+i).value).filter(v=>v!=='');
+  if(!wb||!sh||!vals.length){{alert('Fill in workbook, sheet and at least one value');return;}}
+  const status=document.getElementById('xl-append-status');
+  status.textContent='Appending…';status.style.color='#64ffda';
+  try{{
+    const r=await fetch('/excel/append',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{workbook:wb,sheet:sh,values:vals}})}});
+    const d=await r.json();
+    if(d.status==='error'){{status.style.color='#ff5555';status.textContent='Error: '+d.message;return;}}
+    status.style.color='#64ffda';status.textContent='✅ Row appended!';
+    [1,2,3,4].forEach(i=>document.getElementById('xl-v'+i).value='');
+    loadSheet();
+  }}catch(e){{status.style.color='#ff5555';status.textContent='Error: '+e.message;}}
+}}
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONFLUENCE — Full API routes + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/confluence/spaces")
+def api_confluence_spaces():
+    try:
+        from tools.atlassian import list_confluence_spaces
+        return jsonify({"spaces": list_confluence_spaces()})
+    except Exception as e:
+        return jsonify({"spaces": [], "error": str(e)})
+
+@app.route("/confluence/pages")
+def api_confluence_pages():
+    space_key = request.args.get("space", "")
+    try:
+        from tools.atlassian import _confluence
+        data = _confluence("GET", f"/content?type=page&spaceKey={space_key}&limit=50&expand=title,space")
+        pages = [{"id": p["id"], "title": p["title"], "space": p.get("space", {}).get("key", "")} for p in data.get("results", [])]
+        return jsonify({"pages": pages})
+    except Exception as e:
+        return jsonify({"pages": [], "error": str(e)})
+
+@app.route("/confluence/page/<page_id>")
+def api_confluence_page_detail(page_id):
+    try:
+        from tools.atlassian import get_confluence_page
+        return jsonify(get_confluence_page(page_id))
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route("/confluence/create", methods=["POST"])
+def api_confluence_create():
+    data = request.json or {}
+    try:
+        from tools.atlassian import create_confluence_page
+        result = create_confluence_page(data["space_key"], data["title"], data.get("body", ""))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/confluence/update/<page_id>", methods=["POST"])
+def api_confluence_update(page_id):
+    data = request.json or {}
+    try:
+        from tools.atlassian import update_confluence_page
+        result = update_confluence_page(page_id, data.get("title"), data.get("body"))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/confluence-page")
+def confluence_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confluence — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.cf-layout{{display:grid;grid-template-columns:240px 1fr;gap:16px;height:calc(100vh - 195px)}}
+.cf-sidebar{{background:#1a1c24;border:1px solid #252836;border-radius:10px;overflow-y:auto;padding:8px 0}}
+.cf-main{{background:#1a1c24;border:1px solid #252836;border-radius:10px;display:flex;flex-direction:column;overflow:hidden}}
+.cf-item{{padding:7px 14px;cursor:pointer;font-size:13px;color:#8892b0;border-radius:6px;margin:0 6px}}
+.cf-item:hover{{background:#1e2028;color:#d4d8e8}}
+.cf-item.active{{background:#1c2540;color:#64ffda}}
+.cf-hdr{{padding:12px 14px;border-bottom:1px solid #252836;font-size:13px;font-weight:700;color:#d4d8e8;display:flex;justify-content:space-between;align-items:center}}
+.cf-body{{flex:1;overflow-y:auto;padding:20px;color:#d4d8e8;font-size:13px;line-height:1.6}}
+.sid-hdr{{padding:8px 14px;font-size:10px;font-weight:700;color:#3a4060;letter-spacing:.5px;text-transform:uppercase}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+.page-chip{{padding:10px 14px;background:#12131a;border-radius:6px;cursor:pointer;color:#d4d8e8;font-size:13px;margin-bottom:6px}}
+.page-chip:hover{{background:#1e2028}}
+.cf-modal{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}}
+.cf-modal.open{{display:flex}}
+.cf-modal-box{{background:#1a1c24;border:1px solid #252836;border-radius:12px;padding:24px;width:480px;display:flex;flex-direction:column;gap:12px}}
+.cf-modal-box h2{{font-size:15px;color:#d4d8e8;margin:0}}
+.cf-modal-box input,.cf-modal-box textarea{{background:#12131a;border:1px solid #252836;border-radius:6px;padding:8px 12px;color:#d4d8e8;font-size:13px;width:100%;box-sizing:border-box}}
+.cf-modal-box textarea{{min-height:100px;resize:vertical;font-family:inherit}}
+.cf-modal-box input:focus,.cf-modal-box textarea:focus{{outline:none;border-color:#64ffda}}
+.modal-btns{{display:flex;gap:8px;justify-content:flex-end}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap" style="padding-bottom:0">
+  <div class="page-hdr">
+    <div><div class="page-title">📖 Confluence</div><div class="page-subtitle">Spaces, pages and documentation</div></div>
+    <button class="btn btn-primary" onclick="document.getElementById('cf-modal').classList.add('open')">＋ New Page</button>
+  </div>
+  <div class="cf-layout">
+    <div class="cf-sidebar" id="cf-spaces-list"><div class="empty-msg">Loading…</div></div>
+    <div class="cf-main">
+      <div class="cf-hdr"><span id="cf-title">Select a space</span><button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836;font-size:11px" onclick="cfRefresh()">↻</button></div>
+      <div class="cf-body" id="cf-body"><div class="empty-msg">Pick a space from the sidebar to browse pages</div></div>
+    </div>
+  </div>
+</div>
+<div class="cf-modal" id="cf-modal">
+  <div class="cf-modal-box">
+    <h2>📝 Create Confluence Page</h2>
+    <select id="cf-space-sel" style="background:#12131a;border:1px solid #252836;border-radius:6px;padding:8px 12px;color:#d4d8e8;font-size:13px"><option value="">Select space…</option></select>
+    <input id="cf-new-title" placeholder="Page title">
+    <textarea id="cf-new-body" placeholder="Page body (plain text)"></textarea>
+    <div id="cf-create-status" style="font-size:12px;color:#64ffda"></div>
+    <div class="modal-btns">
+      <button class="btn" onclick="document.getElementById('cf-modal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="createCfPage()">Create</button>
+    </div>
+  </div>
+</div>
+<script>
+let _cfSpaces=[],_cfActiveSpace=null,_cfActivePage=null;
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+async function loadCfSpaces(){{
+  try{{
+    const r=await fetch('/confluence/spaces');const d=await r.json();
+    _cfSpaces=d.spaces||[];
+    const sel=document.getElementById('cf-space-sel');
+    sel.innerHTML='<option value="">Select space…</option>'+_cfSpaces.map(s=>`<option value="${{escH(s.key||'')}}">${{escH(s.name||s.key||'')}}</option>`).join('');
+    document.getElementById('cf-spaces-list').innerHTML=_cfSpaces.length?
+      '<div class="sid-hdr">Spaces</div>'+_cfSpaces.map(s=>`<div class="cf-item" onclick="selectCfSpace('${{escH(s.key||'')}}','${{escH(s.name||s.key||'')}}')"
+        >🗂 ${{escH(s.name||s.key||'')}}</div>`).join(''):
+      '<div class="empty-msg">No spaces found</div>';
+    if(d.error)document.getElementById('cf-spaces-list').innerHTML+=`<div style="padding:8px 14px;font-size:11px;color:#ff5555">${{escH(d.error)}}</div>`;
+  }}catch(e){{document.getElementById('cf-spaces-list').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+async function selectCfSpace(key,name){{
+  _cfActiveSpace=key;_cfActivePage=null;
+  document.getElementById('cf-title').textContent=name+' — Pages';
+  document.getElementById('cf-body').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/confluence/pages?space='+encodeURIComponent(key));const d=await r.json();
+    const pages=d.pages||[];
+    document.getElementById('cf-body').innerHTML=pages.length?
+      pages.map(p=>`<div class="page-chip" onclick="loadCfPage('${{escH(p.id)}}','${{escH(p.title)}}')">📄 ${{escH(p.title)}}</div>`).join(''):
+      '<div class="empty-msg">No pages in this space</div>';
+    if(d.error)document.getElementById('cf-body').innerHTML+=`<div style="padding:8px;font-size:11px;color:#ff5555">${{escH(d.error)}}</div>`;
+  }}catch(e){{document.getElementById('cf-body').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+async function loadCfPage(id,title){{
+  _cfActivePage=id;
+  document.getElementById('cf-title').textContent=title;
+  document.getElementById('cf-body').innerHTML='<div class="empty-msg">Loading…</div>';
+  try{{
+    const r=await fetch('/confluence/page/'+encodeURIComponent(id));const d=await r.json();
+    if(d.error){{document.getElementById('cf-body').innerHTML=`<div class="empty-msg" style="color:#ff5555">${{escH(d.error)}}</div>`;return;}}
+    const body=d.body||d.content||'<em>No content</em>';
+    document.getElementById('cf-body').innerHTML=`<div style="line-height:1.7">${{body}}</div>`;
+  }}catch(e){{document.getElementById('cf-body').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+}}
+function cfRefresh(){{if(_cfActivePage)loadCfPage(_cfActivePage,'');else if(_cfActiveSpace)selectCfSpace(_cfActiveSpace,'');}}
+async function createCfPage(){{
+  const spaceKey=document.getElementById('cf-space-sel').value;
+  const title=document.getElementById('cf-new-title').value.trim();
+  const body=document.getElementById('cf-new-body').value.trim();
+  if(!spaceKey||!title){{alert('Space and title are required');return;}}
+  const status=document.getElementById('cf-create-status');
+  status.textContent='Creating…';status.style.color='#64ffda';
+  try{{
+    const r=await fetch('/confluence/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{space_key:spaceKey,title,body}})}});
+    const d=await r.json();
+    if(d.status==='error'){{status.style.color='#ff5555';status.textContent='Error: '+d.message;return;}}
+    status.textContent='✅ Page created!';
+    setTimeout(()=>{{document.getElementById('cf-modal').classList.remove('open');document.getElementById('cf-create-status').textContent='';if(_cfActiveSpace)selectCfSpace(_cfActiveSpace,'');}},1200);
+  }}catch(e){{status.style.color='#ff5555';status.textContent='Error: '+e.message;}}
+}}
+loadCfSpaces();
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESEARCH — API route + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/research/run", methods=["POST"])
+def api_research_run():
+    data  = request.json or {}
+    query = data.get("query", "").strip()
+    if not query:
+        return jsonify({"status": "error", "message": "Query is required"})
+    try:
+        from tools.browser_tool import deep_research
+        result = deep_research(query, max_sources=data.get("max_sources", 5))
+        return jsonify({"status": "ok", "result": result})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/research-page")
+def research_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Research — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.research-box{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:20px;margin-bottom:16px}}
+.research-input{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
+.research-input input{{flex:1;min-width:220px;background:#12131a;border:1px solid #252836;border-radius:6px;padding:9px 14px;color:#d4d8e8;font-size:14px}}
+.research-input input:focus{{outline:none;border-color:#64ffda}}
+.research-results{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:20px;min-height:200px;color:#d4d8e8;font-size:13px;line-height:1.7}}
+.sources-list{{margin-top:16px;border-top:1px solid #252836;padding-top:14px}}
+.source-chip{{display:inline-block;background:#12131a;border:1px solid #252836;border-radius:14px;padding:3px 10px;font-size:11px;color:#8892b0;margin:3px;text-decoration:none}}
+.source-chip:hover{{color:#64ffda;border-color:#243060}}
+.empty-msg{{text-align:center;padding:40px;color:#8892b0;font-size:13px}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">🔬 Deep Research</div><div class="page-subtitle">Multi-source AI-powered research with credibility scoring</div></div>
+  </div>
+  <div class="research-box">
+    <div class="research-input">
+      <input id="r-query" placeholder="What do you want to research? e.g. latest Python 3.13 features" onkeydown="if(event.key==='Enter')runResearch()">
+      <select id="r-sources" style="background:#12131a;border:1px solid #252836;border-radius:6px;padding:9px 11px;color:#d4d8e8;font-size:13px">
+        <option value="3">3 sources</option>
+        <option value="5" selected>5 sources</option>
+        <option value="8">8 sources</option>
+      </select>
+      <button class="btn btn-primary" id="r-btn" onclick="runResearch()">Research</button>
+    </div>
+  </div>
+  <div class="research-results" id="r-results"><div class="empty-msg">Enter a query above and click Research</div></div>
+</div>
+<script>
+function escH(s){{return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}}
+async function runResearch(){{
+  const query=document.getElementById('r-query').value.trim();if(!query)return;
+  const maxSrc=parseInt(document.getElementById('r-sources').value);
+  const btn=document.getElementById('r-btn');btn.textContent='Researching…';btn.disabled=true;
+  document.getElementById('r-results').innerHTML='<div class="empty-msg">🔍 Researching across '+maxSrc+' sources… this may take 20–30 seconds</div>';
+  try{{
+    const r=await fetch('/research/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{query,max_sources:maxSrc}})}});
+    const d=await r.json();
+    if(d.status==='error'){{document.getElementById('r-results').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(d.message)}}</div>`;return;}}
+    const res=d.result||{{}};
+    const summary=typeof res==='string'?escH(res):escH(res.summary||res.answer||JSON.stringify(res,null,2));
+    const sources=res.sources||[];
+    document.getElementById('r-results').innerHTML=
+      `<div style="white-space:pre-wrap">${{summary}}</div>`+
+      (sources.length?`<div class="sources-list"><div style="font-size:11px;color:#8892b0;margin-bottom:6px;font-weight:700">SOURCES</div>`+
+        sources.map(s=>{{const url=typeof s==='string'?s:s.url||'';const title=typeof s==='string'?s:s.title||url;
+          return `<a href="${{escH(url)}}" target="_blank" class="source-chip">${{escH(String(title).slice(0,60))}}</a>`;
+        }}).join('')+'</div>':'');
+  }}catch(e){{document.getElementById('r-results').innerHTML=`<div class="empty-msg" style="color:#ff5555">Error: ${{escH(e.message)}}</div>`;}}
+  finally{{btn.textContent='Research';btn.disabled=false;}}
+}}
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BRIEFING — API route + PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/briefing/send", methods=["POST"])
+def api_briefing_send():
+    try:
+        from tools.briefing import send_morning_briefing
+        result = send_morning_briefing()
+        return jsonify({"status": "ok", "result": str(result)})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/briefing-page")
+def briefing_page():
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Briefing — Work Assistant</title>{_PAGE_STYLE}
+<style>
+.brief-card{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:32px;margin-bottom:16px;text-align:center}}
+.brief-card h2{{font-size:22px;color:#d4d8e8;margin:0 0 10px}}
+.brief-card p{{font-size:13px;color:#8892b0;margin:0 0 22px;max-width:500px;margin-left:auto;margin-right:auto}}
+.brief-status{{font-size:13px;margin-top:14px;min-height:22px}}
+.brief-what{{background:#1a1c24;border:1px solid #252836;border-radius:10px;padding:20px}}
+.brief-what h3{{font-size:14px;color:#d4d8e8;margin:0 0 14px}}
+.brief-section{{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #1e2030;font-size:13px;color:#8892b0}}
+.brief-section:last-child{{border:none;padding-bottom:0}}
+.brief-icon{{font-size:22px;flex-shrink:0;width:32px;text-align:center}}
+</style></head><body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div><div class="page-title">☀️ Morning Briefing</div><div class="page-subtitle">Get a complete daily digest sent to your email</div></div>
+  </div>
+  <div class="brief-card">
+    <h2>☀️ Send Today's Briefing</h2>
+    <p>Compiles a rich HTML email covering your emails, calendar, Jira issues, GitHub notifications and Slack highlights — sent directly to your inbox</p>
+    <button class="btn btn-primary" id="brief-btn" onclick="sendBriefing()" style="font-size:14px;padding:11px 32px">Send My Briefing Now</button>
+    <div class="brief-status" id="brief-status"></div>
+  </div>
+  <div class="brief-what">
+    <h3>What's included</h3>
+    <div class="brief-section"><div class="brief-icon">📧</div><div><strong style="color:#d4d8e8">Outlook Inbox</strong> — Your 5 most recent unread emails with sender, subject and preview</div></div>
+    <div class="brief-section"><div class="brief-icon">📅</div><div><strong style="color:#d4d8e8">Calendar</strong> — Today's meetings and appointments</div></div>
+    <div class="brief-section"><div class="brief-icon">🐛</div><div><strong style="color:#d4d8e8">Jira</strong> — Your open issues and high-priority items</div></div>
+    <div class="brief-section"><div class="brief-icon">🐙</div><div><strong style="color:#d4d8e8">GitHub</strong> — Notifications, open PRs and review requests</div></div>
+    <div class="brief-section"><div class="brief-icon">💬</div><div><strong style="color:#d4d8e8">Slack</strong> — Recent messages from your channels</div></div>
+  </div>
+</div>
+<script>
+async function sendBriefing(){{
+  const btn=document.getElementById('brief-btn');const status=document.getElementById('brief-status');
+  btn.textContent='Sending…';btn.disabled=true;status.textContent='Building your briefing…';status.style.color='#64ffda';
+  try{{
+    const r=await fetch('/briefing/send',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:'{{}}'}});
+    const d=await r.json();
+    if(d.status==='error'){{status.style.color='#ff5555';status.textContent='Error: '+d.message;return;}}
+    status.style.color='#64ffda';status.textContent='✅ Briefing sent to your inbox!';
+  }}catch(e){{status.style.color='#ff5555';status.textContent='Error: '+e.message;}}
+  finally{{btn.textContent='Send My Briefing Now';btn.disabled=false;}}
+}}
+</script></body></html>"""
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JIRA ACTIONS — transition + comment
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/jira/transition", methods=["POST"])
+def api_jira_transition():
+    data = request.json or {}
+    try:
+        from tools.atlassian import transition_jira_issue
+        result = transition_jira_issue(data["issue_key"], data["status"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/jira/comment", methods=["POST"])
+def api_jira_comment():
+    data = request.json or {}
+    try:
+        from tools.atlassian import add_jira_comment
+        result = add_jira_comment(data["issue_key"], data["comment"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LINEAR ACTIONS — transition + comment
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/linear/transition", methods=["POST"])
+def api_linear_transition():
+    data = request.json or {}
+    try:
+        from tools.linear_tool import transition_linear_issue
+        result = transition_linear_issue(data["issue_id"], data["status"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/linear/comment", methods=["POST"])
+def api_linear_comment():
+    data = request.json or {}
+    try:
+        from tools.linear_tool import add_linear_comment
+        result = add_linear_comment(data["issue_id"], data["comment"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NOTION CREATE PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/notion/create-page", methods=["POST"])
+def api_notion_create():
+    data = request.json or {}
+    try:
+        from tools import notion_tool
+        result = notion_tool.create_notion_page(data["title"], data.get("content", ""), data.get("parent_id"))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ZOOM CREATE MEETING
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/zoom/create", methods=["POST"])
+def api_zoom_create():
+    data = request.json or {}
+    try:
+        from tools.zoom_tool import create_zoom_meeting
+        result = create_zoom_meeting(data["topic"], data.get("start_time"), data.get("duration", 60))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
