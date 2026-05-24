@@ -46,8 +46,9 @@ TOKEN_CACHE_PATH = Path.home() / ".work-assistant-token-cache.json"
 
 def is_authenticated() -> bool:
     """
-    Non-blocking check — returns True if a valid token cache exists.
-    Does NOT trigger device code flow. Safe to call from web routes.
+    Non-blocking check — returns True if a valid token cache exists AND covers
+    all current GRAPH_SCOPES.  If scopes have changed since the token was
+    cached, returns False so the caller knows re-auth is needed.
     """
     if not TOKEN_CACHE_PATH.exists():
         return False
@@ -56,9 +57,21 @@ def is_authenticated() -> bool:
         accounts = app.get_accounts()
         if not accounts:
             return False
-        # Try silent token without force_refresh — fast, no network call if cached
         result = app.acquire_token_silent(GRAPH_SCOPES, account=accounts[0])
-        return bool(result and "access_token" in result)
+        if not result or "access_token" not in result:
+            return False
+        # Check that the token actually covers our required scopes.
+        # MSAL returns the granted scopes in result["scope"] as a space-separated string.
+        granted = set((result.get("scope") or "").lower().split())
+        required = {s.lower() for s in GRAPH_SCOPES}
+        # "openid", "profile", "offline_access", "email" are added implicitly — ignore them
+        _implicit = {"openid", "profile", "offline_access", "email"}
+        missing = required - granted - _implicit
+        if missing:
+            # Stale token — clear cache so next call triggers fresh device-code flow
+            TOKEN_CACHE_PATH.unlink(missing_ok=True)
+            return False
+        return True
     except Exception:
         return False
 
