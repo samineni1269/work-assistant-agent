@@ -1721,13 +1721,25 @@ def connections():
     return jsonify(_check_connections())
 
 
+@app.route("/health")
+def health():
+    """Lightweight health-check used by the restart poller."""
+    return jsonify({"ok": True})
+
+
 @app.route("/restart", methods=["POST"])
 def restart_server():
-    """Restart the Flask process in-place using os.execv."""
+    """Restart the Flask process in-place using os.execv.
+    Passes --no-browser so the restarted process doesn't open a new tab.
+    """
     def _do_restart():
         import time
-        time.sleep(0.3)   # let the HTTP response fly first
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        time.sleep(0.4)   # let the HTTP response fly first
+        # Build argv: keep original script path, add --no-browser if not already there
+        argv = list(sys.argv)
+        if "--no-browser" not in argv:
+            argv.append("--no-browser")
+        os.execv(sys.executable, [sys.executable] + argv)
     threading.Thread(target=_do_restart, daemon=True).start()
     return jsonify({"ok": True, "message": "Restarting…"})
 
@@ -1945,17 +1957,31 @@ async function disconnectMs365() {{
   load();
 }}
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+function _fetchWithTimeout(url, ms) {{
+  // Cross-browser compatible fetch with timeout (replaces AbortSignal.timeout)
+  return new Promise((resolve, reject) => {{
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {{ ctrl.abort(); reject(new Error('timeout')); }}, ms);
+    fetch(url, {{signal: ctrl.signal}})
+      .then(r => {{ clearTimeout(timer); resolve(r); }})
+      .catch(e => {{ clearTimeout(timer); reject(e); }});
+  }});
+}}
+
 // ── Restart ────────────────────────────────────────────────────────────────
 async function restartApp() {{
   const banner = document.getElementById('status-banner');
-  banner.style.display = 'block';
   banner.style.cssText = 'display:block;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:16px;background:#2a2010;color:#ffb86c;border:1px solid #4a3010';
-  banner.textContent = '↺ Restarting server…';
-  try {{ await fetch('/restart', {{method: 'POST'}}); }} catch(e) {{}}
-  for (let i = 0; i < 20; i++) {{
-    await new Promise(r => setTimeout(r, 800));
+  banner.textContent = '↺ Restarting server… (this takes ~5 seconds)';
+  // Fire restart — ignore connection errors (server dies immediately after)
+  try {{ await _fetchWithTimeout('/restart', 3000); }} catch(e) {{}}
+  // Wait 2 s before polling — gives the old process time to die
+  await new Promise(r => setTimeout(r, 2000));
+  // Poll /health — lightweight, no DB or env work, 30 attempts × 1 s = 30 s budget
+  for (let i = 0; i < 30; i++) {{
     try {{
-      const r = await fetch('/connections', {{signal: AbortSignal.timeout(1000)}});
+      const r = await _fetchWithTimeout('/health', 1500);
       if (r.ok) {{
         banner.style.cssText = 'display:block;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:16px;background:#0d2a1a;color:#50fa7b;border:1px solid #1a4a2a';
         banner.textContent = '✅ Server restarted successfully.';
@@ -1963,8 +1989,9 @@ async function restartApp() {{
         return;
       }}
     }} catch(e) {{}}
+    await new Promise(r => setTimeout(r, 1000));
   }}
-  banner.textContent = '⚠ Server did not come back in time. Please refresh manually.';
+  banner.textContent = '⚠ Server is taking longer than expected. Try refreshing the page manually.';
 }}
 
 function showBanner(msg, type) {{
@@ -2514,16 +2541,32 @@ _PAGE_NAV = """
 .nav-link-tool:hover{color:#d4d8e8;border-color:#3a4060}
 </style>
 <script>
+function _navFetchTimeout(url, ms) {
+  return new Promise((resolve, reject) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => { ctrl.abort(); reject(new Error('timeout')); }, ms);
+    fetch(url, {signal: ctrl.signal})
+      .then(r => { clearTimeout(timer); resolve(r); })
+      .catch(e => { clearTimeout(timer); reject(e); });
+  });
+}
 async function navRestart(btn) {
   const orig = btn.textContent;
   btn.textContent = '⏳…'; btn.disabled = true;
-  try { await fetch('/restart', {method:'POST'}); } catch(e) {}
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, 800));
+  // Fire — ignore error (server dies right after)
+  try { await _navFetchTimeout('/restart', 3000); } catch(e) {}
+  // Wait 2 s for old process to die, then poll /health up to 30 s
+  await new Promise(r => setTimeout(r, 2000));
+  for (let i = 0; i < 30; i++) {
     try {
-      const r = await fetch('/connections', {signal: AbortSignal.timeout(1000)});
-      if (r.ok) { btn.textContent = '✅'; setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500); return; }
+      const r = await _navFetchTimeout('/health', 1500);
+      if (r.ok) {
+        btn.textContent = '✅';
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+        return;
+      }
     } catch(e) {}
+    await new Promise(r => setTimeout(r, 1000));
   }
   btn.textContent = '⚠'; btn.disabled = false;
 }
@@ -6065,8 +6108,9 @@ def main():
     # Cloudflare tunnel
     threading.Thread(target=_start_tunnel, daemon=True).start()
 
-    # Open browser
-    threading.Timer(1.5, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
+    # Open browser — skip if restarted via the UI (--no-browser flag)
+    if "--no-browser" not in sys.argv:
+        threading.Timer(1.5, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
 
     print(f"\n🚀  Work Assistant starting at http://localhost:{PORT}")
     print(f"     Press Ctrl+C to stop.\n")
