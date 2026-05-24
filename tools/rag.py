@@ -28,6 +28,7 @@ KB_DIR      = Path(__file__).parent.parent / "knowledge_base"
 META_FILE   = KB_DIR / "metadata.json"
 CHUNK_SIZE  = 500   # characters per chunk
 CHUNK_OVERLAP = 50
+RESEARCH_CACHE_DIR = KB_DIR / "research_cache"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -333,3 +334,64 @@ def kb_stats() -> dict:
         "total_chunks":    total_chunks,
         "documents":       list(meta.values()),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESEARCH CACHE — avoid re-fetching the same topic
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _research_cache_key(topic: str) -> str:
+    """Stable filename for a research topic (normalised + hashed)."""
+    normalised = topic.lower().strip()
+    h = hashlib.md5(normalised.encode()).hexdigest()[:16]
+    return h
+
+
+def cache_research(topic: str, result: dict) -> None:
+    """
+    Store a research result to disk so future identical queries skip the web.
+
+    Args:
+        topic:  The original research query / topic string
+        result: The research result dict (from deep_research or manual search)
+    """
+    RESEARCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    key  = _research_cache_key(topic)
+    path = RESEARCH_CACHE_DIR / f"{key}.json"
+    payload = {
+        "topic":     topic,
+        "cached_at": datetime.datetime.now().isoformat(),
+        "result":    result,
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str))
+
+
+def get_cached_research(topic: str, max_age_hours: int = 24) -> dict | None:
+    """
+    Retrieve a cached research result if it exists and is not expired.
+
+    Args:
+        topic:         The research query to look up
+        max_age_hours: Maximum age in hours before the cache is considered stale
+
+    Returns:
+        The cached result dict, or None if not found / expired
+    """
+    RESEARCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    key  = _research_cache_key(topic)
+    path = RESEARCH_CACHE_DIR / f"{key}.json"
+
+    if not path.exists():
+        return None
+
+    # Check age via filesystem mtime
+    import time as _time
+    age_seconds = _time.time() - path.stat().st_mtime
+    if age_seconds > max_age_hours * 3600:
+        return None  # Expired
+
+    try:
+        payload = json.loads(path.read_text())
+        return payload.get("result")
+    except Exception:
+        return None

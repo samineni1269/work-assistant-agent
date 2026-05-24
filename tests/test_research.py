@@ -79,3 +79,43 @@ def test_parallel_browse_handles_errors_gracefully():
     bad  = next(r for r in results if "bad" in r["url"])
     assert good["text"] == "ok"
     assert "error" in bad
+
+
+# ── Task 4: research cache ─────────────────────────────────────────────────
+
+def test_cache_and_retrieve_research(tmp_path, monkeypatch):
+    import tools.rag as rag_module
+    monkeypatch.setattr(rag_module, "RESEARCH_CACHE_DIR", tmp_path / "research_cache")
+    from tools.rag import cache_research, get_cached_research
+
+    cache_research("what is quantum computing", {"summary": "Quantum computers use qubits", "sources": []})
+    result = get_cached_research("what is quantum computing", max_age_hours=24)
+    assert result is not None
+    assert result["summary"] == "Quantum computers use qubits"
+
+
+def test_cache_miss_returns_none(tmp_path, monkeypatch):
+    import tools.rag as rag_module
+    monkeypatch.setattr(rag_module, "RESEARCH_CACHE_DIR", tmp_path / "research_cache")
+    from tools.rag import get_cached_research
+
+    result = get_cached_research("something never searched", max_age_hours=24)
+    assert result is None
+
+
+def test_cache_expires(tmp_path, monkeypatch):
+    import tools.rag as rag_module
+    monkeypatch.setattr(rag_module, "RESEARCH_CACHE_DIR", tmp_path / "research_cache")
+    from tools.rag import cache_research, get_cached_research
+    import datetime
+
+    cache_research("old topic", {"summary": "Old data"})
+    # Manually backdate the file's mtime by 25 hours
+    cache_dir = tmp_path / "research_cache"
+    for f in cache_dir.iterdir():
+        old_time = (datetime.datetime.now() - datetime.timedelta(hours=25)).timestamp()
+        import os
+        os.utime(f, (old_time, old_time))
+
+    result = get_cached_research("old topic", max_age_hours=24)
+    assert result is None
