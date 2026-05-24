@@ -8,6 +8,7 @@ Run:  python3 app.py
 """
 
 import os
+import sys
 import json
 import threading
 import uuid
@@ -1720,6 +1721,271 @@ def connections():
     return jsonify(_check_connections())
 
 
+@app.route("/restart", methods=["POST"])
+def restart_server():
+    """Restart the Flask process in-place using os.execv."""
+    def _do_restart():
+        import time
+        time.sleep(0.3)   # let the HTTP response fly first
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    threading.Thread(target=_do_restart, daemon=True).start()
+    return jsonify({"ok": True, "message": "Restarting…"})
+
+
+@app.route("/connections-page")
+def connections_page():
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connections — Work Assistant</title>
+{_PAGE_STYLE}
+<style>
+.conn-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;margin-top:20px}}
+.conn-card{{background:#1e2028;border:1px solid #252836;border-radius:8px;padding:16px 18px;transition:border-color .15s}}
+.conn-card:hover{{border-color:#2a3a50}}
+.conn-card-hdr{{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}}
+.conn-name{{font-size:13px;font-weight:700;color:#d4d8e8}}
+.conn-badge{{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px}}
+.conn-badge-ok{{background:#0d2a1a;color:#50fa7b}}
+.conn-badge-no{{background:#2a1010;color:#ff6e6e}}
+.conn-desc{{font-size:11px;color:#6b7394;margin-bottom:12px;line-height:1.5}}
+.conn-fields{{margin-bottom:12px}}
+.conn-field{{display:flex;align-items:center;gap:6px;font-size:11px;color:#8892b0;margin-bottom:4px}}
+.conn-field-dot{{width:7px;height:7px;border-radius:50%;flex-shrink:0}}
+.conn-field-dot-ok{{background:#50fa7b}}
+.conn-field-dot-no{{background:#ff6e6e}}
+.conn-actions{{display:flex;gap:7px;flex-wrap:wrap}}
+.ms365-box{{background:#12141a;border:1px solid #252836;border-radius:6px;padding:12px;margin-top:10px;font-size:11px;display:none}}
+.ms365-code{{font-size:20px;font-weight:700;color:#64ffda;letter-spacing:4px;text-align:center;padding:8px 0}}
+</style>
+</head>
+<body>
+{_PAGE_NAV}
+<div class="page-wrap">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">🔌 Connections</div>
+      <div class="page-subtitle">Connect and manage all your tool integrations from one place</div>
+    </div>
+    <button class="btn btn-danger" onclick="restartApp()">↺ Restart App</button>
+  </div>
+
+  <div id="status-banner" style="display:none;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:16px"></div>
+
+  <div class="conn-grid" id="conn-grid">
+    <div class="empty-state"><div class="empty-state-icon">⏳</div><div class="empty-state-txt">Loading connections…</div></div>
+  </div>
+</div>
+
+<!-- Credentials modal -->
+<div class="modal-overlay" id="creds-modal">
+  <div class="modal-box" style="width:480px">
+    <div class="modal-title" id="modal-title">Configure Integration</div>
+    <div id="modal-desc" style="font-size:11px;color:#6b7394;margin-bottom:12px"></div>
+    <div id="modal-fields"></div>
+    <div id="modal-setup" style="font-size:11px;color:#6b7394;margin-top:6px"></div>
+    <div class="modal-ftr">
+      <button class="btn" style="background:#1e2028;color:#8892b0;border:1px solid #252836" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="modal-save-btn" onclick="saveCredentials()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _credsConfig = {{}};
+let _currentIntegration = null;
+
+async function load() {{
+  const [statusArr, creds] = await Promise.all([
+    fetch('/connections').then(r=>r.json()),
+    fetch('/credentials').then(r=>r.json()),
+  ]);
+  _credsConfig = creds;
+  renderGrid(statusArr, creds);
+}}
+
+function renderGrid(statusArr, creds) {{
+  const statusMap = {{}};
+  statusArr.forEach(s => statusMap[s.name] = s.ok);
+
+  const order = ['M365','AI','Atlassian','GitHub','Slack','Linear','Notion','Zoom','G-Meet'];
+  const html = order.map(key => {{
+    const cfg = creds[key];
+    if (!cfg) return '';
+    const connected = statusMap[cfg.label] ?? cfg.fields.some(f=>f.set);
+    const badge = connected
+      ? '<span class="conn-badge conn-badge-ok">✅ Connected</span>'
+      : '<span class="conn-badge conn-badge-no">✗ Not configured</span>';
+
+    const fieldDots = cfg.fields.map(f =>
+      `<div class="conn-field">
+        <div class="conn-field-dot ${{f.set ? 'conn-field-dot-ok' : 'conn-field-dot-no'}}"></div>
+        <span>${{f.label}}</span>${{f.set ? '' : ' <span style="color:#ff6e6e;font-size:10px">(missing)</span>'}}
+      </div>`
+    ).join('');
+
+    const ms365Extra = key === 'M365' ? `
+      <div id="ms365-box" class="ms365-box">
+        <div style="color:#8892b0;margin-bottom:8px;font-size:11px">Visit the URL below and enter the code to sign in:</div>
+        <a id="ms365-link" href="#" target="_blank" style="font-size:11px;color:#64ffda;display:block;margin-bottom:4px"></a>
+        <div class="ms365-code" id="ms365-user-code">—</div>
+        <div id="ms365-spinner" style="text-align:center;font-size:18px;margin-top:6px">⏳</div>
+      </div>` : '';
+
+    const disconnectBtn = key === 'M365' && connected
+      ? `<button class="btn btn-sm btn-danger" onclick="disconnectMs365()">Disconnect</button>` : '';
+    const connectLabel = key === 'M365' ? (connected ? 'Re-connect' : '🔗 Connect') : null;
+    const connectBtn = connectLabel
+      ? `<button class="btn btn-sm btn-success" id="ms365-connect-btn" onclick="startMs365Auth()">${{connectLabel}}</button>`
+      : '';
+    const configBtn = `<button class="btn btn-sm" style="background:#252836;color:#8892b0;border:1px solid #2a3050" onclick="openModal('${{key}}')">⚙ Configure</button>`;
+    const setupBtn = `<a href="${{cfg.setup_url}}" target="_blank" class="btn btn-sm" style="background:#12141a;color:#64ffda;border:1px solid #1e3050;font-size:10px">↗ Setup docs</a>`;
+
+    return `<div class="conn-card" id="card-${{key}}">
+      <div class="conn-card-hdr"><span class="conn-name">${{cfg.label}}</span>${{badge}}</div>
+      <div class="conn-desc">${{cfg.desc}}</div>
+      <div class="conn-fields">${{fieldDots}}</div>
+      ${{ms365Extra}}
+      <div class="conn-actions">${{configBtn}}${{connectBtn}}${{disconnectBtn}}${{setupBtn}}</div>
+    </div>`;
+  }}).join('');
+
+  document.getElementById('conn-grid').innerHTML = html ||
+    '<div class="empty-state"><div class="empty-state-txt">No integrations found.</div></div>';
+}}
+
+function openModal(key) {{
+  const cfg = _credsConfig[key];
+  if (!cfg) return;
+  _currentIntegration = key;
+  document.getElementById('modal-title').textContent = 'Configure ' + cfg.label;
+  document.getElementById('modal-desc').textContent = cfg.desc;
+  document.getElementById('modal-setup').innerHTML =
+    `<a href="${{cfg.setup_url}}" target="_blank" style="color:#64ffda">↗ Setup guide</a>`;
+  document.getElementById('modal-fields').innerHTML = cfg.fields.map(f => `
+    <div class="form-group">
+      <label class="form-label">${{f.label}}
+        ${{f.set
+          ? '<span style="color:#50fa7b;font-size:9px;margin-left:4px">● set</span>'
+          : '<span style="color:#ff6e6e;font-size:9px;margin-left:4px">● missing</span>'}}
+      </label>
+      <input class="form-input" type="${{f.secret ? 'password' : 'text'}}" id="field-${{f.key}}"
+        placeholder="${{f.set ? '(leave blank to keep current)' : f.placeholder}}" data-key="${{f.key}}">
+    </div>`).join('');
+  document.getElementById('creds-modal').classList.add('open');
+}}
+
+function closeModal() {{
+  document.getElementById('creds-modal').classList.remove('open');
+  _currentIntegration = null;
+}}
+
+async function saveCredentials() {{
+  if (!_currentIntegration) return;
+  const cfg = _credsConfig[_currentIntegration];
+  const values = {{}};
+  cfg.fields.forEach(f => {{
+    const el = document.getElementById('field-' + f.key);
+    if (el && el.value.trim()) values[f.key] = el.value.trim();
+  }});
+  if (!Object.keys(values).length) {{ closeModal(); return; }}
+  const btn = document.getElementById('modal-save-btn');
+  btn.textContent = 'Saving…'; btn.disabled = true;
+  try {{
+    const r = await fetch('/credentials', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{integration: _currentIntegration, values}})
+    }}).then(r => r.json());
+    showBanner(r.error ? r.error : 'Saved: ' + r.saved.join(', '), r.error ? 'error' : 'ok');
+    closeModal();
+    await load();
+  }} finally {{ btn.textContent = 'Save'; btn.disabled = false; }}
+}}
+
+// ── MS365 device flow ──────────────────────────────────────────────────────
+let _ms365Poll = null;
+
+async function startMs365Auth() {{
+  const btn = document.getElementById('ms365-connect-btn');
+  btn.disabled = true; btn.textContent = 'Starting…';
+  const box = document.getElementById('ms365-box');
+  box.style.display = 'block';
+  try {{
+    const r = await fetch('/ms365/auth/start', {{method: 'POST'}}).then(r => r.json());
+    if (r.error) {{ showBanner(r.error, 'error'); box.style.display = 'none'; btn.disabled = false; btn.textContent = '🔗 Connect'; return; }}
+    document.getElementById('ms365-user-code').textContent = r.user_code || '—';
+    const lnk = document.getElementById('ms365-link');
+    lnk.href = r.verification_uri || '#';
+    lnk.textContent = r.verification_uri || '';
+    document.getElementById('ms365-spinner').textContent = '⏳';
+    _ms365Poll = setInterval(pollMs365, 3000);
+  }} catch(e) {{ showBanner('Failed to start auth: ' + e.message, 'error'); btn.disabled = false; btn.textContent = '🔗 Connect'; }}
+}}
+
+async function pollMs365() {{
+  const r = await fetch('/ms365/auth/poll').then(r => r.json());
+  if (r.status === 'connected') {{
+    clearInterval(_ms365Poll);
+    document.getElementById('ms365-spinner').textContent = '✅';
+    showBanner('Microsoft 365 connected!', 'ok');
+    setTimeout(() => load(), 800);
+  }} else if (r.status === 'failed') {{
+    clearInterval(_ms365Poll);
+    document.getElementById('ms365-spinner').textContent = '✗';
+    showBanner(r.error || 'Sign-in failed.', 'error');
+    const btn = document.getElementById('ms365-connect-btn');
+    if (btn) {{ btn.disabled = false; btn.textContent = '🔗 Connect'; }}
+  }}
+}}
+
+async function disconnectMs365() {{
+  await fetch('/ms365/auth/disconnect', {{method: 'POST'}});
+  showBanner('Microsoft 365 disconnected.', 'ok');
+  load();
+}}
+
+// ── Restart ────────────────────────────────────────────────────────────────
+async function restartApp() {{
+  const banner = document.getElementById('status-banner');
+  banner.style.display = 'block';
+  banner.style.cssText = 'display:block;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:16px;background:#2a2010;color:#ffb86c;border:1px solid #4a3010';
+  banner.textContent = '↺ Restarting server…';
+  try {{ await fetch('/restart', {{method: 'POST'}}); }} catch(e) {{}}
+  for (let i = 0; i < 20; i++) {{
+    await new Promise(r => setTimeout(r, 800));
+    try {{
+      const r = await fetch('/connections', {{signal: AbortSignal.timeout(1000)}});
+      if (r.ok) {{
+        banner.style.cssText = 'display:block;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:16px;background:#0d2a1a;color:#50fa7b;border:1px solid #1a4a2a';
+        banner.textContent = '✅ Server restarted successfully.';
+        load();
+        return;
+      }}
+    }} catch(e) {{}}
+  }}
+  banner.textContent = '⚠ Server did not come back in time. Please refresh manually.';
+}}
+
+function showBanner(msg, type) {{
+  const el = document.getElementById('status-banner');
+  el.style.cssText = type === 'ok'
+    ? 'display:block;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:16px;background:#0d2a1a;color:#50fa7b;border:1px solid #1a4a2a'
+    : 'display:block;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:16px;background:#2a1010;color:#ff6e6e;border:1px solid #4a2020';
+  el.textContent = msg;
+  setTimeout(() => {{ el.style.display = 'none'; }}, 5000);
+}}
+
+document.getElementById('creds-modal').addEventListener('click', e => {{
+  if (e.target === document.getElementById('creds-modal')) closeModal();
+}});
+
+load();
+</script>
+</body>
+</html>"""
+
+
 @app.route("/chat", methods=["POST"])
 def chat():
     data    = request.json or {}
@@ -2225,6 +2491,9 @@ _PAGE_NAV = """
     <a href="/kb-page" class="nav-link">🧠 Knowledge Base</a>
     <a href="/alerts-page" class="nav-link">🔔 Alerts</a>
     <a href="/self-learning-page" class="nav-link">🧬 Self-Learning</a>
+    <span style="flex:1"></span>
+    <a href="/connections-page" class="nav-link" style="color:#64ffda;border:1px solid #1e3050;padding:3px 10px;border-radius:5px;flex-shrink:0">🔌 Connections</a>
+    <button onclick="navRestart(this)" class="nav-link" style="background:none;border:1px solid #2a2030;color:#8892b0;cursor:pointer;padding:3px 10px;border-radius:5px;font-family:inherit;font-size:11.5px;flex-shrink:0">↺ Restart</button>
   </div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span style="font-size:10px;color:#3a4060;font-weight:700;letter-spacing:.5px;flex-shrink:0">TOOLS:</span>
@@ -2244,6 +2513,21 @@ _PAGE_NAV = """
 .nav-link-tool{font-size:11px;color:#6872a0;text-decoration:none;padding:2px 8px;border-radius:4px;border:1px solid #1e2030;background:#16171f;transition:all .15s}
 .nav-link-tool:hover{color:#d4d8e8;border-color:#3a4060}
 </style>
+<script>
+async function navRestart(btn) {
+  const orig = btn.textContent;
+  btn.textContent = '⏳…'; btn.disabled = true;
+  try { await fetch('/restart', {method:'POST'}); } catch(e) {}
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 800));
+    try {
+      const r = await fetch('/connections', {signal: AbortSignal.timeout(1000)});
+      if (r.ok) { btn.textContent = '✅'; setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500); return; }
+    } catch(e) {}
+  }
+  btn.textContent = '⚠'; btn.disabled = false;
+}
+</script>
 """
 
 
