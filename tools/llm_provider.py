@@ -113,9 +113,9 @@ TOOLS = [
     {"name": "post_channel_message",
      "description": "Post a message to a Teams channel. WRITE — confirm before posting.",
      "parameters": {"type": "object", "required": ["team_id", "channel_id", "message"], "properties": {
-         "team_id":    {"type": "string"},
-         "channel_id": {"type": "string"},
-         "message":    {"type": "string"},
+         "team_id":    {"type": "string", "description": "Teams team ID (from list_teams)"},
+         "channel_id": {"type": "string", "description": "Channel ID (from get_teams_channels)"},
+         "message":    {"type": "string", "description": "Message text to post"},
      }}},
 
     # ── SHAREPOINT ───────────────────────────────────────────────────────────
@@ -913,20 +913,23 @@ def _to_claude_tools(tools: list) -> list:
 
 
 def _to_openai_tools(tools: list) -> list:
-    """Convert neutral tools to OpenAI/OpenRouter tool format.
+    """Convert neutral tools to OpenAI/OpenRouter/MiniMax tool format.
 
-    MiniMax (and some other providers) reject tool parameters that are missing
-    a 'description' field.  This function adds a sensible fallback description
-    to any parameter that doesn't have one, so the schema is always valid.
+    Strict-schema requirements (MiniMax M2.7, OpenAI strict mode):
+      • Every parameter must have a non-empty 'description'
+      • Top-level parameters object must include 'additionalProperties': false
+      • Top-level parameters object must include 'type': 'object'
+
+    This function enforces all three so every provider gets a valid schema.
     """
     result = []
     for tool in tools:
         params = dict(tool.get("parameters", {}))
-        if "type" not in params:
-            params["type"] = "object"
+        params["type"] = "object"
         if "properties" not in params:
             params["properties"] = {}
-        # Ensure every parameter has a description (required by some providers)
+
+        # Ensure every parameter has a description
         fixed_props = {}
         for pname, pdef in params["properties"].items():
             pdef = dict(pdef)
@@ -934,6 +937,10 @@ def _to_openai_tools(tools: list) -> list:
                 pdef["description"] = pname.replace("_", " ").capitalize()
             fixed_props[pname] = pdef
         params["properties"] = fixed_props
+
+        # MiniMax M2.7 strict mode: additionalProperties MUST be false
+        params["additionalProperties"] = False
+
         result.append({
             "type": "function",
             "function": {
